@@ -41,14 +41,6 @@
           </el-input>
           <el-input v-model="form.password" :placeholder="$t('password')" type="password" autocomplete="off">
           </el-input>
-          <!-- ===== 新增：登录 Turnstile 人机验证 ===== -->
-          <div v-show="loginVerifyShow" class="login-turnstile"
-               :data-sitekey="settingStore.settings.siteKey"
-               data-callback="onLoginTurnstileSuccess"
-               data-error-callback="onLoginTurnstileError">
-            <span style="font-size: 12px;color: #F56C6C" v-if="loginBotJsError">{{ $t('verifyModuleFailed') }}</span>
-          </div>
-          <!-- ======================================= -->
           <el-button class="btn" type="primary" @click="submit" :loading="loginLoading"
           >{{ $t('loginBtn') }}
           </el-button>
@@ -192,6 +184,7 @@ const bindForm = reactive({
 const form = reactive({
   email: '',
   password: '',
+
 });
 const mySelect = ref()
 const suffix = ref('')
@@ -210,13 +203,6 @@ let turnstileId = null
 let botJsError = ref(false)
 let verifyErrorCount = 0
 
-// ===== 新增：登录 Turnstile 变量 =====
-const loginVerifyShow = ref(false)
-let loginVerifyToken = ''
-let loginTurnstileId = null
-let loginBotJsError = ref(false)
-let loginVerifyErrorCount = 0
-
 window.onTurnstileSuccess = (token) => {
   verifyToken = token;
 };
@@ -233,26 +219,6 @@ window.onTurnstileError = (e) => {
         turnstileId = window.turnstile.render('.register-turnstile')
       } else {
         window.turnstile.reset(turnstileId);
-      }
-    })
-  }, 1500)
-};
-
-// ===== 新增：登录 Turnstile 回调 =====
-window.onLoginTurnstileSuccess = (token) => {
-  loginVerifyToken = token;
-};
-
-window.onLoginTurnstileError = (e) => {
-  if (loginVerifyErrorCount >= 4) return;
-  loginVerifyErrorCount++;
-  console.warn('登录人机验证加载失败', e)
-  setTimeout(() => {
-    nextTick(() => {
-      if (!loginTurnstileId) {
-        loginTurnstileId = window.turnstile.render('.login-turnstile')
-      } else {
-        window.turnstile.reset(loginTurnstileId);
       }
     })
   }, 1500)
@@ -426,43 +392,9 @@ const submit = () => {
     return
   }
 
-  // ===== 新增：登录 Turnstile 校验 =====
-  if (settingStore.settings.secretKey) {
-    if (!loginVerifyToken) {
-      if (!loginVerifyShow.value) {
-        loginVerifyShow.value = true
-        nextTick(() => {
-          if (!loginTurnstileId) {
-            try {
-              loginTurnstileId = window.turnstile.render('.login-turnstile')
-            } catch (e) {
-              loginBotJsError.value = true
-              console.log('登录人机验证js加载失败')
-            }
-          } else {
-            window.turnstile.reset('.login-turnstile')
-          }
-        })
-      } else if (!loginBotJsError.value) {
-        ElMessage({
-          message: t('botVerifyMsg'),
-          type: "error",
-          plain: true
-        })
-      }
-      return;
-    }
-  }
-
   loginLoading.value = true
-  login(email, form.password, loginVerifyToken).then(async data => {
+  login(email, form.password).then(async data => {
     await saveToken(data.token)
-  }).catch(() => {
-    // 登录失败时重置 Turnstile
-    loginVerifyToken = ''
-    if (loginTurnstileId) {
-      window.turnstile.reset(loginTurnstileId)
-    }
   }).finally(() => {
     loginLoading.value = false
   })
@@ -783,4 +715,128 @@ function submitRegister() {
   bottom: 10px;
   right: 10px;
   z-index: 1000;
-  border: 1px soli
+  border: 1px solid var(--el-border-color-light);
+  box-shadow: var(--el-box-shadow-light);
+  cursor: pointer;
+}
+
+:deep(.el-input-group__append) {
+  padding: 0 !important;
+  padding-left: 8px !important;
+  padding-right: 4px !important;
+  background: var(--el-bg-color);
+  border-radius: 0 8px 8px 0;
+}
+
+:deep(.el-button+.el-button) {
+  margin: 0;
+}
+
+.register-turnstile {
+  margin-bottom: 18px;
+}
+
+.select {
+  position: absolute;
+  right: 30px;
+  width: 100px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.custom-style {
+  margin-bottom: 10px;
+}
+
+.custom-style .el-segmented {
+  --el-border-radius-base: 6px;
+  width: 180px;
+}
+
+
+#login-box {
+  background: linear-gradient(to bottom, #2980b9, #6dd5fa, #fff);
+  font: 100% Arial, sans-serif;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden;
+  display: grid;
+  grid-template-columns: 1fr;
+}
+
+
+#background-wrap {
+  height: 100%;
+  z-index: 0;
+}
+
+@keyframes animateCloud {
+  0% {
+    margin-left: -500px;
+  }
+
+  100% {
+    margin-left: 100%;
+  }
+}
+
+.x1 {
+  animation: animateCloud 30s linear infinite;
+  transform: scale(0.65);
+}
+
+.x2 {
+  animation: animateCloud 15s linear infinite;
+  transform: scale(0.3);
+}
+
+.x3 {
+  animation: animateCloud 25s linear infinite;
+  transform: scale(0.5);
+}
+
+.x4 {
+  animation: animateCloud 13s linear infinite;
+  transform: scale(0.4);
+}
+
+.x5 {
+  animation: animateCloud 20s linear infinite;
+  transform: scale(0.55);
+}
+
+.cloud {
+  background: linear-gradient(to bottom, #fff 5%, #f1f1f1 100%);
+  border-radius: 100px;
+  box-shadow: 0 8px 5px rgba(0, 0, 0, 0.1);
+  height: 120px;
+  width: 350px;
+  position: relative;
+}
+
+.cloud:after,
+.cloud:before {
+  content: "";
+  position: absolute;
+  background: #fff;
+  z-index: -1;
+}
+
+.cloud:after {
+  border-radius: 100px;
+  height: 100px;
+  left: 50px;
+  top: -50px;
+  width: 100px;
+}
+
+.cloud:before {
+  border-radius: 200px;
+  height: 180px;
+  width: 180px;
+  right: 50px;
+  top: -90px;
+}
+
+</style>
