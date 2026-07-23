@@ -41,6 +41,13 @@
           </el-input>
           <el-input v-model="form.password" :placeholder="$t('password')" type="password" autocomplete="off">
           </el-input>
+          <!-- 新增：登录 Turnstile 人机验证 -->
+          <div v-show="loginVerifyShow" class="login-turnstile"
+               :data-sitekey="settingStore.settings.siteKey"
+               data-callback="onLoginTurnstileSuccess"
+               data-error-callback="onLoginTurnstileError">
+            <span style="font-size: 12px;color: #F56C6C" v-if="loginBotJsError">{{ $t('verifyModuleFailed') }}</span>
+          </div>
           <el-button class="btn" type="primary" @click="submit" :loading="loginLoading"
           >{{ $t('loginBtn') }}
           </el-button>
@@ -175,6 +182,13 @@ const oauthLoading = ref(false);
 const showBindForm = ref(false);
 const show = ref('login')
 
+// 新增：登录 Turnstile 变量
+const loginVerifyShow = ref(false)
+let loginVerifyToken = ''
+let loginTurnstileId = null
+let loginBotJsError = ref(false)
+let loginVerifyErrorCount = 0
+
 const bindForm = reactive({
   email: '',
   oauthUserId: '',
@@ -184,7 +198,6 @@ const bindForm = reactive({
 const form = reactive({
   email: '',
   password: '',
-
 });
 const mySelect = ref()
 const suffix = ref('')
@@ -219,6 +232,26 @@ window.onTurnstileError = (e) => {
         turnstileId = window.turnstile.render('.register-turnstile')
       } else {
         window.turnstile.reset(turnstileId);
+      }
+    })
+  }, 1500)
+};
+
+// 新增：登录 Turnstile 回调
+window.onLoginTurnstileSuccess = (token) => {
+  loginVerifyToken = token;
+};
+
+window.onLoginTurnstileError = (e) => {
+  if (loginVerifyErrorCount >= 4) return;
+  loginVerifyErrorCount++;
+  console.warn('登录人机验证加载失败', e)
+  setTimeout(() => {
+    nextTick(() => {
+      if (!loginTurnstileId) {
+        loginTurnstileId = window.turnstile.render('.login-turnstile')
+      } else {
+        window.turnstile.reset(loginTurnstileId);
       }
     })
   }, 1500)
@@ -392,9 +425,42 @@ const submit = () => {
     return
   }
 
+  // 新增：登录 Turnstile 校验
+  if (settingStore.settings.secretKey) {
+    if (!loginVerifyToken) {
+      if (!loginVerifyShow.value) {
+        loginVerifyShow.value = true
+        nextTick(() => {
+          if (!loginTurnstileId) {
+            try {
+              loginTurnstileId = window.turnstile.render('.login-turnstile')
+            } catch (e) {
+              loginBotJsError.value = true
+              console.log('登录人机验证js加载失败')
+            }
+          } else {
+            window.turnstile.reset('.login-turnstile')
+          }
+        })
+      } else if (!loginBotJsError.value) {
+        ElMessage({
+          message: t('botVerifyMsg'),
+          type: "error",
+          plain: true
+        })
+      }
+      return;
+    }
+  }
+
   loginLoading.value = true
-  login(email, form.password, '').then(async data => {
+  login(email, form.password, loginVerifyToken).then(async data => {
     await saveToken(data.token)
+  }).catch(() => {
+    loginVerifyToken = ''
+    if (loginTurnstileId) {
+      window.turnstile.reset(loginTurnstileId)
+    }
   }).finally(() => {
     loginLoading.value = false
   })
@@ -736,6 +802,11 @@ function submitRegister() {
   margin-bottom: 18px;
 }
 
+/* 新增：登录 Turnstile 样式 */
+.login-turnstile {
+  margin-bottom: 18px;
+}
+
 .select {
   position: absolute;
   right: 30px;
@@ -803,7 +874,7 @@ function submitRegister() {
 
 .x5 {
   animation: animateCloud 20s linear infinite;
-  transform: scale(0.55);
+  transform: scale(0.5);
 }
 
 .cloud {
