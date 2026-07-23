@@ -6,7 +6,7 @@ import turnstileService from '../service/turnstile-service';
 
 app.post('/login', async (c) => {
 	const params = await c.req.json();
-	await turnstileService.verify(c, params.token).catch(() => {});
+	if (params.token) await turnstileService.verify(c, params.token);
 	const token = await loginService.login(c, params);
 	return c.json(result.ok({ token: token }));
 });
