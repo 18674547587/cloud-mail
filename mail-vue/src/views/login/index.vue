@@ -393,7 +393,7 @@ const submit = () => {
   }
 
   loginLoading.value = true
-  login(email, form.password).then(async data => {
+  login(email, form.password, '').then(async data => {
     await saveToken(data.token)
   }).finally(() => {
     loginLoading.value = false
