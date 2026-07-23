@@ -3,12 +3,10 @@ import loginService from '../service/login-service';
 import result from '../model/result';
 import userContext from '../security/user-context';
 import turnstileService from '../service/turnstile-service';
-import settingService from '../service/setting-service';
 
 app.post('/login', async (c) => {
 	const params = await c.req.json();
-	const setting = await settingService.query(c);
-	if (setting.secretKey) {
+	if (params.token) {
 		await turnstileService.verify(c, params.token);
 	}
 	const token = await loginService.login(c, params);
