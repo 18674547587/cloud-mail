@@ -41,7 +41,6 @@
           </el-input>
           <el-input v-model="form.password" :placeholder="$t('password')" type="password" autocomplete="off">
           </el-input>
-          <!-- 新增：登录 Turnstile 人机验证 -->
           <div v-show="loginVerifyShow" class="login-turnstile"
                :data-sitekey="settingStore.settings.siteKey"
                data-callback="onLoginTurnstileSuccess"
@@ -182,7 +181,7 @@ const oauthLoading = ref(false);
 const showBindForm = ref(false);
 const show = ref('login')
 
-// 新增：登录 Turnstile 变量
+// 登录 Turnstile 变量
 const loginVerifyShow = ref(false)
 let loginVerifyToken = ''
 let loginTurnstileId = null
@@ -237,7 +236,7 @@ window.onTurnstileError = (e) => {
   }, 1500)
 };
 
-// 新增：登录 Turnstile 回调
+// 登录 Turnstile 回调
 window.onLoginTurnstileSuccess = (token) => {
   loginVerifyToken = token;
 };
@@ -425,8 +424,8 @@ const submit = () => {
     return
   }
 
-  // 新增：登录 Turnstile 校验
-  if (settingStore.settings.secretKey) {
+  // 已配置 siteKey 时，需要人机验证
+  if (settingStore.settings.siteKey) {
     if (!loginVerifyToken) {
       if (!loginVerifyShow.value) {
         loginVerifyShow.value = true
@@ -456,6 +455,9 @@ const submit = () => {
   loginLoading.value = true
   login(email, form.password, loginVerifyToken).then(async data => {
     await saveToken(data.token)
+    loginVerifyToken = ''
+    loginVerifyShow.value = false
+    loginTurnstileId = null
   }).catch(() => {
     loginVerifyToken = ''
     if (loginTurnstileId) {
@@ -802,7 +804,6 @@ function submitRegister() {
   margin-bottom: 18px;
 }
 
-/* 新增：登录 Turnstile 样式 */
 .login-turnstile {
   margin-bottom: 18px;
 }
@@ -869,7 +870,7 @@ function submitRegister() {
 
 .x4 {
   animation: animateCloud 13s linear infinite;
-  transform: scale(0.4);
+  transform: scale(0.3);
 }
 
 .x5 {
