@@ -41,11 +41,13 @@
           </el-input>
           <el-input v-model="form.password" :placeholder="$t('password')" type="password" autocomplete="off">
           </el-input>
-          <div v-show="loginVerifyShow" class="login-turnstile"
-               :data-sitekey="settingStore.settings.siteKey"
-               data-callback="onLoginTurnstileSuccess"
-               data-error-callback="onLoginTurnstileError">
-            <span style="font-size: 12px;color: #F56C6C" v-if="loginBotJsError">{{ $t('verifyModuleFailed') }}</span>
+          <div v-show="loginVerifyShow" ref="loginTurnstileRef" class="turnstile-container">
+            <span style="font-size: 12px;color: #F56C6C" v-if="loginBotJsError">
+              {{ $t('verifyModuleFailed') }}
+            </span>
+            <span style="font-size: 12px;color: #E6A23C" v-else-if="loginVerifying">
+              验证中...
+            </span>
           </div>
           <el-button class="btn" type="primary" @click="submit" :loading="loginLoading"
           >{{ $t('loginBtn') }}
@@ -87,15 +89,13 @@
                     type="text" autocomplete="off"/>
           <el-input v-if="settingStore.settings.regKey === 2" v-model="registerForm.code"
                     :placeholder="$t('regKeyOptional')" type="text" autocomplete="off"/>
-          <div v-show="verifyShow"
-               class="register-turnstile"
-               :data-sitekey="settingStore.settings.siteKey"
-               data-callback="onTurnstileSuccess"
-               data-error-callback="onTurnstileError"
-               data-after-interactive-callback="loadAfter"
-               data-before-interactive-callback="loadBefore"
-          >
-            <span style="font-size: 12px;color: #F56C6C" v-if="botJsError">{{ $t('verifyModuleFailed') }}</span>
+          <div v-show="verifyShow" ref="registerTurnstileRef" class="turnstile-container">
+            <span style="font-size: 12px;color: #F56C6C" v-if="botJsError">
+              {{ $t('verifyModuleFailed') }}
+            </span>
+            <span style="font-size: 12px;color: #E6A23C" v-else-if="registerVerifying">
+              验证中...
+            </span>
           </div>
           <el-button class="btn" style="margin: 0" type="primary" @click="submitRegister" :loading="registerLoading"
           >{{ $t('regBtn') }}
@@ -181,12 +181,26 @@ const oauthLoading = ref(false);
 const showBindForm = ref(false);
 const show = ref('login')
 
-// 登录 Turnstile 变量
+// 登录 Turnstile
+const loginTurnstileRef = ref(null)
 const loginVerifyShow = ref(false)
+const loginVerifying = ref(false)
 let loginVerifyToken = ''
 let loginTurnstileId = null
 let loginBotJsError = ref(false)
 let loginVerifyErrorCount = 0
+let pendingLoginEmail = ''
+
+// 注册 Turnstile
+const registerTurnstileRef = ref(null)
+const verifyShow = ref(false)
+const registerVerifying = ref(false)
+let verifyToken = ''
+let turnstileId = null
+let botJsError = ref(false)
+let verifyErrorCount = 0
+
+const MAX_TURNSTILE_RETRY = 3
 
 const bindForm = reactive({
   email: '',
@@ -209,60 +223,275 @@ const registerForm = reactive({
 const domainList = settingStore.domainList;
 const registerLoading = ref(false)
 suffix.value = domainList[0]
-const verifyShow = ref(false)
-let verifyToken = ''
-let turnstileId = null
-let botJsError = ref(false)
-let verifyErrorCount = 0
 
-window.onTurnstileSuccess = (token) => {
-  verifyToken = token;
-};
+// ======== Turnstile 工具函数 ========
 
-window.onTurnstileError = (e) => {
-  if (verifyErrorCount >= 4) {
+function getTurnstileTheme() {
+  return uiStore.dark ? 'dark' : 'light'
+}
+
+function renderTurnstile(containerRef, { onSuccess, onError }) {
+  nextTick(() => {
+    if (!containerRef.value) {
+      console.warn('Turnstile 容器未找到')
+      return
+    }
+    const el = containerRef.value
+    if (el.offsetParent === null) {
+      console.warn('Turnstile 容器不可见，延迟渲染')
+      setTimeout(() => renderTurnstile(containerRef, { onSuccess, onError }), 300)
+      return
+    }
+    try {
+      if (typeof window.turnstile === 'undefined') {
+        console.error('Turnstile JS 未加载')
+        onError('JS 未加载')
+        return
+      }
+      const theme = getTurnstileTheme()
+      const lang = settingStore.lang || 'zh-CN'
+      const id = window.turnstile.render(el, {
+        sitekey: settingStore.settings.siteKey,
+        callback: (token) => { onSuccess(token) },
+        'error-callback': () => { onError('验证失败') },
+        'expired-callback': () => { onSuccess('') },
+        theme: theme,
+        language: lang,
+        'refresh-expired': 'manual',
+      })
+      return id
+    } catch (e) {
+      console.error('Turnstile 渲染失败:', e)
+      onError(e.message || '渲染失败')
+      return null
+    }
+  })
+}
+
+function resetTurnstile(id) {
+  if (id && window.turnstile) {
+    try { window.turnstile.reset(id) } catch (e) { console.warn('Turnstile 重置失败:', e) }
+  }
+}
+
+function removeTurnstile(id) {
+  if (id && window.turnstile) {
+    try { window.turnstile.remove(id) } catch (e) { console.warn('Turnstile 移除失败:', e) }
+  }
+}
+
+// ======== 登录 Turnstile ========
+
+function showLoginTurnstile(loginEmail) {
+  if (loginEmail) pendingLoginEmail = loginEmail
+  loginVerifyShow.value = true
+  loginVerifying.value = true
+  loginBotJsError.value = false
+  renderTurnstile(loginTurnstileRef, {
+    onSuccess: (token) => {
+      loginVerifyToken = token
+      loginVerifying.value = false
+      if (token) doLogin(pendingLoginEmail)
+    },
+    onError: (err) => {
+      loginVerifying.value = false
+      loginVerifyErrorCount++
+      if (loginVerifyErrorCount <= MAX_TURNSTILE_RETRY) {
+        console.warn(`登录 Turnstile 验证失败 (${loginVerifyErrorCount}/${MAX_TURNSTILE_RETRY})`, err)
+        setTimeout(() => {
+          if (loginTurnstileId) { resetTurnstile(loginTurnstileId) }
+          else { showLoginTurnstile() }
+        }, 1500)
+      } else {
+        loginBotJsError.value = true
+        ElMessage({ message: t('verifyModuleFailed'), type: "error", plain: true, duration: 5000 })
+      }
+    }
+  })
+}
+
+// ======== 注册 Turnstile ========
+
+function showRegisterTurnstile() {
+  verifyShow.value = true
+  registerVerifying.value = true
+  botJsError.value = false
+  renderTurnstile(registerTurnstileRef, {
+    onSuccess: (token) => {
+      verifyToken = token
+      registerVerifying.value = false
+      if (token) doRegister()
+    },
+    onError: (err) => {
+      registerVerifying.value = false
+      verifyErrorCount++
+      if (verifyErrorCount <= MAX_TURNSTILE_RETRY) {
+        console.warn(`注册 Turnstile 验证失败 (${verifyErrorCount}/${MAX_TURNSTILE_RETRY})`, err)
+        setTimeout(() => {
+          if (turnstileId) { resetTurnstile(turnstileId) }
+          else { showRegisterTurnstile() }
+        }, 1500)
+      } else {
+        botJsError.value = true
+        ElMessage({ message: t('verifyModuleFailed'), type: "error", plain: true, duration: 5000 })
+      }
+    }
+  })
+}
+
+// ======== 登录逻辑 ========
+
+const submit = () => {
+  if (!form.email) {
+    ElMessage({ message: t('emptyEmailMsg'), type: 'error', plain: true })
     return
   }
-  verifyErrorCount++
-  console.warn('人机验加载失败', e)
-  setTimeout(() => {
-    nextTick(() => {
-      if (!turnstileId) {
-        turnstileId = window.turnstile.render('.register-turnstile')
-      } else {
-        window.turnstile.reset(turnstileId);
-      }
-    })
-  }, 1500)
-};
-
-// 登录 Turnstile 回调
-window.onLoginTurnstileSuccess = (token) => {
-  loginVerifyToken = token;
-};
-
-window.onLoginTurnstileError = (e) => {
-  if (loginVerifyErrorCount >= 4) return;
-  loginVerifyErrorCount++;
-  console.warn('登录人机验证加载失败', e)
-  setTimeout(() => {
-    nextTick(() => {
-      if (!loginTurnstileId) {
-        loginTurnstileId = window.turnstile.render('.login-turnstile')
-      } else {
-        window.turnstile.reset(loginTurnstileId);
-      }
-    })
-  }, 1500)
-};
-
-window.loadAfter = (e) => {
-  console.log('loadAfter')
+  const fullEmail = getFullEmail(form.email);
+  if (!isEmail(fullEmail)) {
+    ElMessage({ message: t('notEmailMsg'), type: 'error', plain: true })
+    return
+  }
+  if (!form.password) {
+    ElMessage({ message: t('emptyPwdMsg'), type: 'error', plain: true })
+    return
+  }
+  if (settingStore.settings.siteKey) {
+    if (loginVerifyToken) {
+      doLogin(fullEmail)
+    } else if (!loginVerifyShow.value) {
+      loginVerifyErrorCount = 0
+      showLoginTurnstile(fullEmail)
+    } else if (loginVerifying.value) {
+      ElMessage({ message: t('botVerifyMsg'), type: "warning", plain: true })
+    } else if (loginBotJsError.value) {
+      ElMessage({ message: t('verifyModuleFailed'), type: "error", plain: true })
+    } else {
+      if (loginTurnstileId) { resetTurnstile(loginTurnstileId); loginVerifyToken = '' }
+      else { showLoginTurnstile(fullEmail) }
+    }
+    return
+  }
+  doLogin(fullEmail)
 }
 
-window.loadBefore = (e) => {
-  console.log('loadBefore')
+async function doLogin(email) {
+  loginLoading.value = true
+  login(email, form.password, loginVerifyToken).then(async data => {
+    await saveToken(data.token)
+    if (loginTurnstileId) { removeTurnstile(loginTurnstileId); loginTurnstileId = null }
+    loginVerifyToken = ''
+    loginVerifyShow.value = false
+    loginVerifying.value = false
+    loginBotJsError.value = false
+    loginVerifyErrorCount = 0
+  }).catch(() => {
+    loginVerifyToken = ''
+    if (loginTurnstileId) resetTurnstile(loginTurnstileId)
+  }).finally(() => {
+    loginLoading.value = false
+  })
 }
+
+// ======== 注册逻辑 ========
+
+function submitRegister() {
+  if (!registerForm.email) {
+    ElMessage({ message: t('emptyEmailMsg'), type: 'error', plain: true })
+    return
+  }
+  if (getEmailName(registerForm.email).length < settingStore.settings.minEmailPrefix) {
+    ElMessage({ message: t('minEmailPrefix', {msg: settingStore.settings.minEmailPrefix}), type: 'error', plain: true })
+    return
+  }
+  const email = getFullEmail(registerForm.email);
+  if (!isEmail(email)) {
+    ElMessage({ message: t('notEmailMsg'), type: 'error', plain: true })
+    return
+  }
+  if (!registerForm.password) {
+    ElMessage({ message: t('emptyPwdMsg'), type: 'error', plain: true })
+    return
+  }
+  if (registerForm.password.length < 6) {
+    ElMessage({ message: t('pwdLengthMsg'), type: 'error', plain: true })
+    return
+  }
+  if (registerForm.password !== registerForm.confirmPassword) {
+    ElMessage({ message: t('confirmPwdFailMsg'), type: 'error', plain: true })
+    return
+  }
+  if (settingStore.settings.regKey === 0) {
+    if (!registerForm.code) {
+      ElMessage({ message: t('emptyRegKeyMsg'), type: 'error', plain: true })
+      return
+    }
+  }
+  const needVerify = settingStore.settings.siteKey && (
+    settingStore.settings.registerVerify === 0 ||
+    (settingStore.settings.registerVerify === 2 && settingStore.settings.regVerifyOpen)
+  )
+  if (needVerify) {
+    if (verifyToken) {
+      doRegister()
+    } else if (!verifyShow.value) {
+      verifyErrorCount = 0
+      showRegisterTurnstile()
+    } else if (registerVerifying.value) {
+      ElMessage({ message: t('botVerifyMsg'), type: "warning", plain: true })
+    } else if (botJsError.value) {
+      ElMessage({ message: t('verifyModuleFailed'), type: "error", plain: true })
+    } else {
+      if (turnstileId) { resetTurnstile(turnstileId); verifyToken = '' }
+      else { showRegisterTurnstile() }
+    }
+    return
+  }
+  doRegister()
+}
+
+async function doRegister() {
+  registerLoading.value = true
+  const formData = {
+    email: getFullEmail(registerForm.email),
+    password: registerForm.password,
+    token: verifyToken,
+    code: registerForm.code
+  }
+  register(formData).then(({regVerifyOpen}) => {
+    show.value = 'login'
+    registerForm.email = ''
+    registerForm.password = ''
+    registerForm.confirmPassword = ''
+    registerForm.code = ''
+    verifyToken = ''
+    settingStore.settings.regVerifyOpen = regVerifyOpen
+    if (turnstileId) { removeTurnstile(turnstileId); turnstileId = null }
+    verifyShow.value = false
+    registerVerifying.value = false
+    botJsError.value = false
+    verifyErrorCount = 0
+    ElMessage({ message: t('regSuccessMsg'), type: 'success', plain: true })
+  }).catch(res => {
+    if (res.code === 400) {
+      verifyToken = ''
+      settingStore.settings.regVerifyOpen = true
+      if (turnstileId) { resetTurnstile(turnstileId) }
+      else { nextTick(() => showRegisterTurnstile()) }
+      verifyShow.value = true
+    }
+  }).finally(() => {
+    registerLoading.value = false
+  })
+}
+
+// ======== 清理全局回调（防止冲突） ========
+
+window.onTurnstileSuccess = undefined
+window.onTurnstileError = undefined
+window.onLoginTurnstileSuccess = undefined
+window.onLoginTurnstileError = undefined
+window.loadAfter = undefined
+window.loadBefore = undefined
 
 const loginOpacity = computed(() => {
   const opacity = settingStore.settings.loginOpacity
@@ -272,7 +501,6 @@ const loginOpacity = computed(() => {
 const hideLoginDomain = computed(() => settingStore.settings.loginDomain === 1)
 
 const background = computed(() => {
-
   return settingStore.settings.background ? {
     'background-image': `url(${cvtR2Url(settingStore.settings.background)})`,
     'background-repeat': 'no-repeat',
@@ -303,169 +531,50 @@ function linuxDoLogin() {
 linuxDoGetUser();
 
 async function linuxDoGetUser() {
-
   const params = new URLSearchParams(window.location.search)
   const code = params.get('code')
-
   if (code) {
-
     oauthLoading.value = true
     oauthLinuxDoLogin(code).then(data => {
-
       bindForm.oauthUserId = data.userInfo.oauthUserId;
-
       if (!data.token) {
         showBindForm.value = true
         oauthLoading.value = false
-        ElMessage({
-          message: '请注册绑定一个邮箱',
-          type: 'warning',
-          duration: 4000,
-          plain: true,
-        })
+        ElMessage({ message: '请注册绑定一个邮箱', type: 'warning', duration: 4000, plain: true })
         return;
       }
-
       saveToken(data.token);
-    }).catch(() => {
-      oauthLoading.value = false
-    })
+    }).catch(() => { oauthLoading.value = false })
   }
-
   const cleanUrl = window.location.origin + window.location.pathname
   window.history.replaceState({}, '', cleanUrl)
 }
 
 function bind() {
-
   if (!bindForm.email) {
-    ElMessage({
-      message: t('emptyEmailMsg'),
-      type: 'error',
-      plain: true,
-    })
+    ElMessage({ message: t('emptyEmailMsg'), type: 'error', plain: true })
     return
   }
-
-
   if (getEmailName(bindForm.email).length < settingStore.settings.minEmailPrefix) {
-    ElMessage({
-      message: t('minEmailPrefix', {msg: settingStore.settings.minEmailPrefix}),
-      type: 'error',
-      plain: true,
-    })
+    ElMessage({ message: t('minEmailPrefix', {msg: settingStore.settings.minEmailPrefix}), type: 'error', plain: true })
     return
   }
-
   let email = getFullEmail(bindForm.email);
-
-
   if (!isEmail(email)) {
-    ElMessage({
-      message: t('notEmailMsg'),
-      type: 'error',
-      plain: true,
-    })
+    ElMessage({ message: t('notEmailMsg'), type: 'error', plain: true })
     return
   }
-
   if (settingStore.settings.regKey === 0) {
-
     if (!bindForm.code) {
-
-      ElMessage({
-        message: t('emptyRegKeyMsg'),
-        type: 'error',
-        plain: true,
-      })
+      ElMessage({ message: t('emptyRegKeyMsg'), type: 'error', plain: true })
       return
     }
-
   }
-
-  const form = {email, oauthUserId: bindForm.oauthUserId, code: bindForm.code}
-
+  const formData = {email, oauthUserId: bindForm.oauthUserId, code: bindForm.code}
   bindLoading.value = true
-  oauthBindUser(form).then(data => {
+  oauthBindUser(formData).then(data => {
     saveToken(data.token)
-  }).catch(() => {
-    bindLoading.value = false
-  })
-}
-
-const submit = () => {
-
-  if (!form.email) {
-    ElMessage({
-      message: t('emptyEmailMsg'),
-      type: 'error',
-      plain: true,
-    })
-    return
-  }
-
-  let email = getFullEmail(form.email);
-
-  if (!isEmail(email)) {
-    ElMessage({
-      message: t('notEmailMsg'),
-      type: 'error',
-      plain: true,
-    })
-    return
-  }
-
-  if (!form.password) {
-    ElMessage({
-      message: t('emptyPwdMsg'),
-      type: 'error',
-      plain: true,
-    })
-    return
-  }
-
-  // 已配置 siteKey 时，需要人机验证
-  if (settingStore.settings.siteKey) {
-    if (!loginVerifyToken) {
-      if (!loginVerifyShow.value) {
-        loginVerifyShow.value = true
-        nextTick(() => {
-          if (!loginTurnstileId) {
-            try {
-              loginTurnstileId = window.turnstile.render('.login-turnstile')
-            } catch (e) {
-              loginBotJsError.value = true
-              console.log('登录人机验证js加载失败')
-            }
-          } else {
-            window.turnstile.reset('.login-turnstile')
-          }
-        })
-      } else if (!loginBotJsError.value) {
-        ElMessage({
-          message: t('botVerifyMsg'),
-          type: "error",
-          plain: true
-        })
-      }
-      return;
-    }
-  }
-
-  loginLoading.value = true
-  login(email, form.password, loginVerifyToken).then(async data => {
-    await saveToken(data.token)
-    loginVerifyToken = ''
-    loginVerifyShow.value = false
-    loginTurnstileId = null
-  }).catch(() => {
-    loginVerifyToken = ''
-    if (loginTurnstileId) {
-      window.turnstile.reset(loginTurnstileId)
-    }
-  }).finally(() => {
-    loginLoading.value = false
-  })
+  }).catch(() => { bindLoading.value = false })
 }
 
 async function saveToken(token) {
@@ -493,422 +602,78 @@ function refreshWebsiteConfig() {
       suffix.value = setting.domainList[0]
     }
     document.title = setting.title
-  }).catch(e => {
-    console.error(e)
-  })
+  }).catch(e => { console.error(e) })
 }
-
-
-function submitRegister() {
-
-  if (!registerForm.email) {
-    ElMessage({
-      message: t('emptyEmailMsg'),
-      type: 'error',
-      plain: true,
-    })
-    return
-  }
-
-  console.log(registerForm.email)
-
-  if (getEmailName(registerForm.email).length < settingStore.settings.minEmailPrefix) {
-    ElMessage({
-      message: t('minEmailPrefix', {msg: settingStore.settings.minEmailPrefix}),
-      type: 'error',
-      plain: true,
-    })
-    return
-  }
-
-  const email = getFullEmail(registerForm.email);
-
-  if (!isEmail(email)) {
-    ElMessage({
-      message: t('notEmailMsg'),
-      type: 'error',
-      plain: true,
-    })
-    return
-  }
-
-  if (!registerForm.password) {
-    ElMessage({
-      message: t('emptyPwdMsg'),
-      type: 'error',
-      plain: true,
-    })
-    return
-  }
-
-  if (registerForm.password.length < 6) {
-    ElMessage({
-      message: t('pwdLengthMsg'),
-      type: 'error',
-      plain: true,
-    })
-    return
-  }
-
-  if (registerForm.password !== registerForm.confirmPassword) {
-
-    ElMessage({
-      message: t('confirmPwdFailMsg'),
-      type: 'error',
-      plain: true,
-    })
-    return
-  }
-
-  if (settingStore.settings.regKey === 0) {
-
-    if (!registerForm.code) {
-
-      ElMessage({
-        message: t('emptyRegKeyMsg'),
-        type: 'error',
-        plain: true,
-      })
-      return
-    }
-
-  }
-
-  if (!verifyToken && (settingStore.settings.registerVerify === 0 || (settingStore.settings.registerVerify === 2 && settingStore.settings.regVerifyOpen))) {
-    if (!verifyShow.value) {
-      verifyShow.value = true
-      nextTick(() => {
-        if (!turnstileId) {
-          try {
-            turnstileId = window.turnstile.render('.register-turnstile')
-          } catch (e) {
-            botJsError.value = true
-            console.log('人机验证js加载失败')
-          }
-        } else {
-          window.turnstile.reset('.register-turnstile')
-        }
-      })
-    } else if (!botJsError.value) {
-      ElMessage({
-        message: t('botVerifyMsg'),
-        type: "error",
-        plain: true
-      })
-    }
-    return;
-  }
-
-  registerLoading.value = true
-
-  const form = {
-    email,
-    password: registerForm.password,
-    token: verifyToken,
-    code: registerForm.code
-  }
-
-  register(form).then(({regVerifyOpen}) => {
-    show.value = 'login'
-    registerForm.email = ''
-    registerForm.password = ''
-    registerForm.confirmPassword = ''
-    registerForm.code = ''
-    registerLoading.value = false
-    verifyToken = ''
-    settingStore.settings.regVerifyOpen = regVerifyOpen
-    verifyShow.value = false
-    ElMessage({
-      message: t('regSuccessMsg'),
-      type: 'success',
-      plain: true,
-    })
-  }).catch(res => {
-
-    registerLoading.value = false
-
-    if (res.code === 400) {
-      verifyToken = ''
-      settingStore.settings.regVerifyOpen = true
-      if (turnstileId) {
-        window.turnstile.reset(turnstileId)
-      } else {
-        nextTick(() => {
-          turnstileId = window.turnstile.render('.register-turnstile')
-        })
-      }
-      verifyShow.value = true
-
-    }
-  });
-}
-
 </script>
 
-
 <style>
-.el-select-dropdown__item {
-  padding: 0 15px;
-}
-
-.no-autofill-pwd {
-  .el-input__inner {
-    -webkit-text-security: disc !important;
-  }
-}
+.el-select-dropdown__item { padding: 0 15px; }
+.no-autofill-pwd .el-input__inner { -webkit-text-security: disc !important; }
 </style>
 
 <style lang="scss" scoped>
-
 .form-wrapper {
-  position: fixed;
-  right: 0;
-  height: 100%;
-  z-index: 10;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  @media (max-width: 767px) {
-    width: 100%;
-  }
+  position: fixed; right: 0; height: 100%; z-index: 10;
+  display: flex; align-items: center; justify-content: center;
+  @media (max-width: 767px) { width: 100%; }
 }
-
 .container {
   background: v-bind(loginOpacity);
-  padding-left: 40px;
-  padding-right: 40px;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  width: 450px;
-  height: 100%;
+  padding-left: 40px; padding-right: 40px;
+  display: flex; flex-direction: column; justify-content: center;
+  width: 450px; height: 100%;
   border-left: 1px solid var(--login-border);
   box-shadow: var(--el-box-shadow-light);
-  @media (max-width: 1024px) {
-    padding: 20px 18px;
-    width: 384px;
-    margin-left: 18px;
-  }
+  @media (max-width: 1024px) { padding: 20px 18px; width: 384px; margin-left: 18px; }
   @media (max-width: 767px) {
-    border: 1px solid var(--login-border);
-    padding: 20px 18px;
-    border-radius: 6px;
-    height: fit-content;
-    width: 100%;
-    margin-right: 18px;
-    margin-left: 18px;
+    border: 1px solid var(--login-border); padding: 20px 18px;
+    border-radius: 6px; height: fit-content; width: 100%;
+    margin-right: 18px; margin-left: 18px;
   }
-
-  .btn {
-    height: 36px;
-    width: 100%;
-    border-radius: 6px;
-  }
-
-  .form-desc {
-    margin-top: 5px;
-    margin-bottom: 18px;
-    color: var(--form-desc-color);
-  }
-
-  .form-title {
-    font-weight: bold;
-    font-size: 22px !important;
-  }
-
-  .switch {
-    margin-top: 20px;
-    text-align: center;
-
-    span {
-      color: var(--login-switch-color);
-      cursor: pointer;
-    }
-  }
-
-  :deep(.el-input__wrapper) {
-    border-radius: 6px;
-    background: var(--el-bg-color);
-  }
-
-  .email-input :deep(.el-input__wrapper) {
-    border-radius: 6px 0 0 6px;
-    background: var(--el-bg-color);
-  }
-
-  .el-input {
-    height: 38px;
-    width: 100%;
-    margin-bottom: 18px;
-
-    :deep(.el-input__inner) {
-      height: 36px;
-    }
+  .btn { height: 36px; width: 100%; border-radius: 6px; }
+  .form-desc { margin-top: 5px; margin-bottom: 18px; color: var(--form-desc-color); }
+  .form-title { font-weight: bold; font-size: 22px !important; }
+  .switch { margin-top: 20px; text-align: center; span { color: var(--login-switch-color); cursor: pointer; } }
+  :deep(.el-input__wrapper) { border-radius: 6px; background: var(--el-bg-color); }
+  .email-input :deep(.el-input__wrapper) { border-radius: 6px 0 0 6px; background: var(--el-bg-color); }
+  .el-input { height: 38px; width: 100%; margin-bottom: 18px;
+    :deep(.el-input__inner) { height: 36px; }
   }
 }
-
-:deep(.el-select-dropdown__item) {
-  padding: 0 10px;
+:deep(.el-select-dropdown__item) { padding: 0 10px; }
+:deep(.bind-dialog) { width: 400px !important;
+  @media (max-width: 440px) { width: calc(100% - 40px) !important; margin-right: 20px !important; margin-left: 20px !important; }
 }
-
-:deep(.bind-dialog) {
-  width: 400px !important;
-  @media (max-width: 440px) {
-    width: calc(100% - 40px) !important;
-    margin-right: 20px !important;
-    margin-left: 20px !important;
-  }
-}
-
-.bind-container {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 15px;
-}
-
-.setting-icon {
-  position: relative;
-  top: 6px;
-}
-
+.bind-container { display: grid; grid-template-columns: 1fr; gap: 15px; }
+.setting-icon { position: relative; top: 6px; }
 .github {
-  position: fixed;
-  width: 35px;
-  height: 35px;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  border-radius: 50%;
-  background: var(--el-bg-color);
-  bottom: 10px;
-  right: 10px;
-  z-index: 1000;
+  position: fixed; width: 35px; height: 35px;
+  display: flex; justify-content: center; align-items: center;
+  border-radius: 50%; background: var(--el-bg-color);
+  bottom: 10px; right: 10px; z-index: 1000;
   border: 1px solid var(--el-border-color-light);
-  box-shadow: var(--el-box-shadow-light);
-  cursor: pointer;
+  box-shadow: var(--el-box-shadow-light); cursor: pointer;
 }
-
-:deep(.el-input-group__append) {
-  padding: 0 !important;
-  padding-left: 8px !important;
-  padding-right: 4px !important;
-  background: var(--el-bg-color);
-  border-radius: 0 8px 8px 0;
-}
-
-:deep(.el-button+.el-button) {
-  margin: 0;
-}
-
-.register-turnstile {
-  margin-bottom: 18px;
-}
-
-.login-turnstile {
-  margin-bottom: 18px;
-}
-
-.select {
-  position: absolute;
-  right: 30px;
-  width: 100px;
-  opacity: 0;
-  pointer-events: none;
-}
-
-.custom-style {
-  margin-bottom: 10px;
-}
-
-.custom-style .el-segmented {
-  --el-border-radius-base: 6px;
-  width: 180px;
-}
-
-
-#login-box {
-  background: linear-gradient(to bottom, #2980b9, #6dd5fa, #fff);
-  font: 100% Arial, sans-serif;
-  height: 100%;
-  margin: 0;
-  padding: 0;
-  overflow-x: hidden;
-  display: grid;
-  grid-template-columns: 1fr;
-}
-
-
-#background-wrap {
-  height: 100%;
-  z-index: 0;
-}
-
-@keyframes animateCloud {
-  0% {
-    margin-left: -500px;
-  }
-
-  100% {
-    margin-left: 100%;
-  }
-}
-
-.x1 {
-  animation: animateCloud 30s linear infinite;
-  transform: scale(0.65);
-}
-
-.x2 {
-  animation: animateCloud 15s linear infinite;
-  transform: scale(0.3);
-}
-
-.x3 {
-  animation: animateCloud 25s linear infinite;
-  transform: scale(0.5);
-}
-
-.x4 {
-  animation: animateCloud 13s linear infinite;
-  transform: scale(0.3);
-}
-
-.x5 {
-  animation: animateCloud 20s linear infinite;
-  transform: scale(0.5);
-}
-
+:deep(.el-input-group__append) { padding: 0 !important; padding-left: 8px !important; padding-right: 4px !important; background: var(--el-bg-color); border-radius: 0 8px 8px 0; }
+:deep(.el-button+.el-button) { margin: 0; }
+.turnstile-container { margin-bottom: 18px; min-height: 65px; display: flex; align-items: center; justify-content: center; }
+.select { position: absolute; right: 30px; width: 100px; opacity: 0; pointer-events: none; }
+.custom-style { margin-bottom: 10px; }
+.custom-style .el-segmented { --el-border-radius-base: 6px; width: 180px; }
+#login-box { background: linear-gradient(to bottom, #2980b9, #6dd5fa, #fff); font: 100% Arial, sans-serif; height: 100%; margin: 0; padding: 0; overflow-x: hidden; display: grid; grid-template-columns: 1fr; }
+#background-wrap { height: 100%; z-index: 0; }
+@keyframes animateCloud { 0% { margin-left: -500px; } 100% { margin-left: 100%; } }
+.x1 { animation: animateCloud 30s linear infinite; transform: scale(0.65); }
+.x2 { animation: animateCloud 15s linear infinite; transform: scale(0.3); }
+.x3 { animation: animateCloud 25s linear infinite; transform: scale(0.5); }
+.x4 { animation: animateCloud 13s linear infinite; transform: scale(0.3); }
+.x5 { animation: animateCloud 20s linear infinite; transform: scale(0.5); }
 .cloud {
   background: linear-gradient(to bottom, #fff 5%, #f1f1f1 100%);
-  border-radius: 100px;
-  box-shadow: 0 8px 5px rgba(0, 0, 0, 0.1);
-  height: 120px;
-  width: 350px;
-  position: relative;
+  border-radius: 100px; box-shadow: 0 8px 5px rgba(0,0,0,0.1);
+  height: 120px; width: 350px; position: relative;
 }
-
-.cloud:after,
-.cloud:before {
-  content: "";
-  position: absolute;
-  background: #fff;
-  z-index: -1;
-}
-
-.cloud:after {
-  border-radius: 100px;
-  height: 100px;
-  left: 50px;
-  top: -50px;
-  width: 100px;
-}
-
-.cloud:before {
-  border-radius: 200px;
-  height: 180px;
-  width: 180px;
-  right: 50px;
-  top: -90px;
-}
-
+.cloud:after, .cloud:before { content: ""; position: absolute; background: #fff; z-index: -1; }
+.cloud:after { border-radius: 100px; height: 100px; left: 50px; top: -50px; width: 100px; }
+.cloud:before { border-radius: 200px; height: 180px; width: 180px; right: 50px; top: -90px; }
 </style>

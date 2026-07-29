@@ -3,10 +3,16 @@ import loginService from '../service/login-service';
 import result from '../model/result';
 import userContext from '../security/user-context';
 import turnstileService from '../service/turnstile-service';
+import settingService from '../service/setting-service';
+import { t } from '../i18n/i18n';
 
 app.post('/login', async (c) => {
 	const params = await c.req.json();
-	if (params.token) {
+	const settingRow = await settingService.query(c);
+	if (settingRow.siteKey) {
+		if (!params.token) {
+			return c.json(result.error(t('emptyBotToken'), 400));
+		}
 		await turnstileService.verify(c, params.token);
 	}
 	const token = await loginService.login(c, params);
