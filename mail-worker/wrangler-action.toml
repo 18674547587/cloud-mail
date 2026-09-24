@@ -5,8 +5,14 @@ compatibility_date = "2025-06-04"
 [observability]
 enabled = true
 
+# 主入口（由 CUSTOM_DOMAIN Secret 控制）
 [[routes]]
 pattern = "${CUSTOM_DOMAIN}"
+custom_domain = true
+
+# 备用入口（硬编码；如需更换请修改此处）
+[[routes]]
+pattern = "m.260040.xyz"
 custom_domain = true
 
 [[d1_databases]]
