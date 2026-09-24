@@ -53,6 +53,7 @@ const en = {
 	starNotExistEmail: 'Starred email does not exist',
 	emptyBotToken: 'Please verify that you are human',
 	botVerifyFail: 'Bot verification failed, please try again',
+	apiSecretFail: 'Invalid API secret',
 	authExpired: 'Authentication has expired. Please sign in again',
 	unauthorized: 'Unauthorized',
 	bannedSend: 'You can only send emails to internal mailboxes',

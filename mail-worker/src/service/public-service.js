@@ -5,6 +5,7 @@ import { and, asc, desc, eq, sql } from 'drizzle-orm';
 import saltHashUtils from '../utils/crypto-utils';
 import cryptoUtils from '../utils/crypto-utils';
 import emailUtils from '../utils/email-utils';
+import domainUtils from '../utils/domain-uitls';
 import roleService from './role-service';
 import verifyUtils from '../utils/verify-utils';
 import { t } from '../i18n/i18n';
@@ -104,7 +105,7 @@ const publicService = {
 				throw new BizError(t('notEmail'));
 			}
 
-			if (!c.env.domain.includes(emailUtils.getDomain(emailRow.email))) {
+			if (!(domainUtils.parseDomainList(c.env.domain) || []).includes(emailUtils.getDomain(emailRow.email))) {
 				throw new BizError(t('notEmailDomain'));
 			}
 

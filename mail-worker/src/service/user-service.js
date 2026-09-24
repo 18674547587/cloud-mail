@@ -12,6 +12,7 @@ import dayjs from 'dayjs';
 import permService from './perm-service';
 import roleService from './role-service';
 import emailUtils from '../utils/email-utils';
+import domainUtils from '../utils/domain-uitls';
 import saltHashUtils from '../utils/crypto-utils';
 import constant from '../const/constant';
 import { t } from '../i18n/i18n'
@@ -306,7 +307,7 @@ const userService = {
 
 		const { email, type, password } = params;
 
-		if (!c.env.domain.includes(emailUtils.getDomain(email))) {
+		if (!(domainUtils.parseDomainList(c.env.domain) || []).includes(emailUtils.getDomain(email))) {
 			throw new BizError(t('notEmailDomain'));
 		}
 

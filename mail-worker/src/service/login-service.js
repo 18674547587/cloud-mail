@@ -1,6 +1,7 @@
 import BizError from '../error/biz-error';
 import userService from './user-service';
 import emailUtils from '../utils/email-utils';
+import domainUtils from '../utils/domain-uitls';
 import { isDel, settingConst, userConst } from '../const/entity-const';
 import JwtUtils from '../utils/jwt-utils';
 import { v4 as uuidv4 } from 'uuid';
@@ -61,7 +62,7 @@ const loginService = {
 			throw new BizError(t('pwdMinLength'));
 		}
 
-		if (!c.env.domain.includes(emailUtils.getDomain(email))) {
+		if (!(domainUtils.parseDomainList(c.env.domain) || []).includes(emailUtils.getDomain(email))) {
 			throw new BizError(t('notEmailDomain'));
 		}
 
