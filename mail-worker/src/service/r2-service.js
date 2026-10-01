@@ -1,6 +1,7 @@
 import s3Service from './s3-service';
 import settingService from './setting-service';
 import kvObjService from './kv-obj-service';
+import b2Service from './b2-service';
 
 const r2Service = {
 
@@ -44,23 +45,34 @@ const r2Service = {
 
 		const storageType = await this.storageType(c);
 
+		// 统一的冷归档回源兜底：任一存储后端未命中时，尝试从 Backblaze B2 取
+		const fallback = async (resp) => {
+			if (resp && resp.status === 404) {
+				const archived = await b2Service.toObjResp(c.env, key);
+				if (archived) {
+					return archived;
+				}
+			}
+			return resp;
+		};
+
 		if (storageType === 'KV') {
-			return await kvObjService.toObjResp(c, key);
+			return await fallback(await kvObjService.toObjResp(c, key));
 		}
 
 		if (storageType === 'S3') {
-			return await s3Service.toObjResp(c, key);
+			return await fallback(await s3Service.toObjResp(c, key));
 		}
 
 		// R2
 		if (!c.env.r2) {
-			return new Response('Object storage not configured', { status: 404 });
+			return await fallback(new Response('Object storage not configured', { status: 404 }));
 		}
 
 		const obj = await c.env.r2.get(key);
 
 		if (!obj) {
-			return new Response('Not Found', { status: 404 });
+			return await fallback(new Response('Not Found', { status: 404 }));
 		}
 
 		const headers = {};
