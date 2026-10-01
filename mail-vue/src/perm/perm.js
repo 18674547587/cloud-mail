@@ -118,5 +118,15 @@ const routers = {
             name: 'analysis',
             menu: true
         }
+    }],
+    'log:query': [{
+        path: '/logs',
+        name: 'log',
+        component: () => import('@/views/log/index.vue'),
+        meta: {
+            title: 'logs',
+            name: 'log',
+            menu: true
+        }
     }]
 }

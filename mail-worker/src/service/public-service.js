@@ -47,6 +47,17 @@ const publicService = {
 		size = Number(size);
 		num = Number(num);
 
+		// 防止异常/恶意入参导致全表导出或分页错乱
+		if (!Number.isFinite(size) || size <= 0) {
+			size = 20
+		}
+		if (size > 100) {
+			size = 100
+		}
+		if (!Number.isFinite(num) || num <= 0) {
+			num = 1
+		}
+
 		num = (num - 1) * size;
 
 		let conditions = []
@@ -137,13 +148,13 @@ const publicService = {
 			}
 
 			const userSql = `INSERT INTO user (email, password, salt, type, os, browser, active_ip, create_ip, device, active_time, create_time)
-			VALUES ('${email}', '${hash}', '${salt}', '${type}', '${os}', '${browser}', '${activeIp}', '${activeIp}', '${device}', '${activeTime}', '${activeTime}')`
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 			const accountSql = `INSERT INTO account (email, name, user_id)
-			VALUES ('${email}', '${emailUtils.getName(email)}', 0);`;
+			VALUES (?, ?, 0);`
 
-			userList.push(c.env.db.prepare(userSql));
-			userList.push(c.env.db.prepare(accountSql));
+			userList.push(c.env.db.prepare(userSql).bind(email, hash, salt, type, os, browser, activeIp, activeIp, device, activeTime, activeTime));
+			userList.push(c.env.db.prepare(accountSql).bind(email, emailUtils.getName(email)));
 
 		}
 

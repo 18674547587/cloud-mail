@@ -38,7 +38,13 @@
             </el-select>
           </template>
           <template #suffix>
-            <div style="display: flex;margin-right: 3px;">
+            <div style="display: flex;align-items: center;gap: 6px;margin-right: 3px;">
+              <span
+                  class="distribute"
+                  :class="form.manyType ? 'checked' : ''"
+                  :title="t('sendSeparatelyTip')"
+                  @click.stop="checkDistribute"
+              >{{ $t('sendSeparately') }}</span>
               <Icon icon="fa7-solid:user-plus" width="20" height="20" class="add-contact" @click.stop="openContacts" />
             </div>
           </template>
@@ -56,7 +62,9 @@
             <div class="att-item" v-for="(item,index) in form.attachments" :key="index">
               <Icon v-bind="getIconByName(item.filename)"/>
               <span class="att-filename">{{ item.filename }}</span>
-              <span class="att-size">{{ formatBytes(item.size) }}</span>
+              <span class="att-size" v-if="item.uploading">{{ item.progress }}%</span>
+              <span class="att-size" v-else-if="item.error" style="color: #f56c6c;">{{ $t('attUploadFail') }}</span>
+              <span class="att-size" v-else>{{ formatBytes(item.size) }}</span>
               <Icon style="cursor: pointer;" icon="material-symbols-light:close-rounded" @click="delAtt(index)"
                     width="22" height="22"/>
             </div>
@@ -98,10 +106,12 @@ import {h, nextTick, onMounted, onUnmounted, reactive, ref, toRaw, computed} fro
 import {Icon} from "@iconify/vue";
 import {useUserStore} from "@/store/user.js";
 import {emailSend} from "@/request/email.js";
+import {attPresign} from "@/request/att.js";
+import axios from "axios";
 import {isEmail} from "@/utils/verify-utils.js";
 import {useAccountStore} from "@/store/account.js";
 import {useEmailStore} from "@/store/email.js";
-import {fileToBase64, formatBytes} from "@/utils/file-utils.js";
+import {formatBytes} from "@/utils/file-utils.js";
 import {getIconByName} from "@/utils/icon-utils.js";
 import sendPercent from "@/components/send-percent/index.vue"
 import {toOssDomain} from "@/utils/convert.js";
@@ -149,6 +159,9 @@ const form = reactive({
   sendEmail: '',
   receiveEmail: [],
   accountId: -1,
+  // 默认「分别发送」：每个收件人单独一封，互相看不到对方邮箱（隐私安全优先）
+  // 只有一个收件人时会自动退化为普通发送，无额外开销
+  manyType: 'divide',
   name: '',
   subject: '',
   content: '',
@@ -250,6 +263,11 @@ function addTagChange(val) {
   if (selectStatus && has) openSelect()
 }
 
+// 切换「分别发送」：开启后每个收件人单独收到一封邮件，收件人之间互相看不到邮箱
+function checkDistribute() {
+  form.manyType = form.manyType ? null : 'divide'
+}
+
 function clearContent() {
   ElMessageBox.confirm(t('clearContentConfirm'), {
     confirmButtonText: t('confirm'),
@@ -265,23 +283,107 @@ function delAtt(index) {
   form.attachments.splice(index, 1);
 }
 
+// 附件上限：直传模式下文件不经过 Worker 内存，可以放宽
+const MAX_ATT_COUNT = 10
+const MAX_ATT_SIZE = 500 * 1024 * 1024
+const MAX_ATT_TOTAL_SIZE = 1024 * 1024 * 1024
+
+// 先申请直传凭证，再把文件直接 PUT 到对象存储
+// 文件不再转 base64 塞进请求体，因此大文件不会让浏览器内存耗尽
+async function uploadAtt(file) {
+
+  const item = reactive({
+    key: '',
+    filename: file.name,
+    size: file.size,
+    contentType: file.type || 'application/octet-stream',
+    uploading: true,
+    progress: 0,
+    error: false
+  })
+
+  form.attachments.push(item)
+
+  try {
+
+    const res = await attPresign({
+      filename: file.name,
+      size: file.size,
+      contentType: item.contentType
+    })
+
+    item.key = res.key
+
+    // 用原生 axios 直传，避免带上本站 Authorization 头影响预签名校验
+    await axios.put(res.uploadUrl, file, {
+      headers: res.headers,
+      onUploadProgress: (e) => {
+        item.progress = e.total ? Math.round((e.loaded * 100) / e.total) : 0
+      }
+    })
+
+    item.uploading = false
+    item.progress = 100
+
+  } catch (e) {
+
+    item.uploading = false
+    item.error = true
+
+    ElMessage({
+      message: `${file.name}：${t('attUploadFail')}`,
+      type: 'error',
+      plain: true,
+    })
+  }
+}
+
 function chooseFile() {
   const doc = document.createElement("input")
   doc.setAttribute("type", "file")
   doc.multiple = true;
   doc.click()
-  doc.onchange = async (e) => {
+  doc.onchange = (e) => {
 
-    const fileList = e.target.files;
+    const fileList = Array.from(e.target.files || []);
+
+    if (fileList.length === 0) {
+      return;
+    }
+
+    if (form.attachments.length + fileList.length > MAX_ATT_COUNT) {
+      ElMessage({
+        message: t('attCountLimit'),
+        type: 'error',
+        plain: true,
+      })
+      return;
+    }
+
+    let totalSize = form.attachments.reduce((sum, item) => sum + (item.size || 0), 0)
 
     for (const file of fileList) {
 
-      const size = file.size
-      const filename = file.name
-      const contentType = file.type
+      if (file.size > MAX_ATT_SIZE) {
+        ElMessage({
+          message: `${file.name}：${t('attSizeLimit')}`,
+          type: 'error',
+          plain: true,
+        })
+        continue
+      }
 
-      const content = await fileToBase64(file)
-      form.attachments.push({content, filename, size, contentType})
+      if (totalSize + file.size > MAX_ATT_TOTAL_SIZE) {
+        ElMessage({
+          message: t('attTotalSizeLimit'),
+          type: 'error',
+          plain: true,
+        })
+        break
+      }
+
+      totalSize += file.size
+      uploadAtt(file)
 
     }
 
@@ -321,9 +423,27 @@ async function sendEmail() {
     return
   }
 
-  if (form.manyType === 'divide' && form.attachments.length > 0) {
+  if (form.manyType === 'divide' && form.attachments.length > 0 && form.receiveEmail.length > 20) {
     ElMessage({
-      message: t('noSeparateSendMsg'),
+      message: t('divideAttLimitMsg'),
+      type: 'error',
+      plain: true,
+    })
+    return
+  }
+
+  if (form.attachments.some(item => item.uploading)) {
+    ElMessage({
+      message: t('attUploadingMsg'),
+      type: 'error',
+      plain: true,
+    })
+    return
+  }
+
+  if (form.attachments.some(item => !item.key || item.error)) {
+    ElMessage({
+      message: t('attUploadRetryMsg'),
       type: 'error',
       plain: true,
     })
@@ -412,7 +532,8 @@ function resetForm() {
   form.receiveEmail = []
   form.subject = ''
   form.content = ''
-  form.manyType = null
+  // 复位后回到默认的「分别发送」
+  form.manyType = 'divide'
   form.attachments = []
   form.sendType = ''
   form.emailId = 0
@@ -693,6 +814,29 @@ function close() {
       display: grid;
       grid-template-rows: auto auto 1fr auto;
       gap: 15px;
+
+      .distribute {
+        cursor: pointer;
+        color: var(--el-color-info);
+        background: var(--el-color-info-light-9);
+        border: 1px solid var(--el-color-info-light-8);
+        border-radius: 4px;
+        font-size: 12px;
+        line-height: 18px;
+        padding: 0 5px;
+        user-select: none;
+        white-space: nowrap;
+      }
+
+      .distribute.checked {
+        background: var(--el-color-primary-light-9);
+        color: var(--el-color-primary) !important;
+      }
+
+      .distribute:hover {
+        background: var(--el-color-primary-light-9);
+        color: var(--el-color-primary) !important;
+      }
 
       .item-title {
       }

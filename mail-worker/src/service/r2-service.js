@@ -40,8 +40,44 @@ const r2Service = {
 
 	},
 
-	async getObj(c, key) {
-		return await c.env.r2.get(key);
+	async toObjResp(c, key) {
+
+		const storageType = await this.storageType(c);
+
+		if (storageType === 'KV') {
+			return await kvObjService.toObjResp(c, key);
+		}
+
+		if (storageType === 'S3') {
+			return await s3Service.toObjResp(c, key);
+		}
+
+		// R2
+		if (!c.env.r2) {
+			return new Response('Object storage not configured', { status: 404 });
+		}
+
+		const obj = await c.env.r2.get(key);
+
+		if (!obj) {
+			return new Response('Not Found', { status: 404 });
+		}
+
+		const headers = {};
+
+		if (obj.httpMetadata?.contentType) {
+			headers['Content-Type'] = obj.httpMetadata.contentType;
+		}
+
+		if (obj.httpMetadata?.contentDisposition) {
+			headers['Content-Disposition'] = obj.httpMetadata.contentDisposition;
+		}
+
+		if (obj.httpMetadata?.cacheControl) {
+			headers['Cache-Control'] = obj.httpMetadata.cacheControl;
+		}
+
+		return new Response(obj.body, { headers });
 	},
 
 	async delete(c, key) {

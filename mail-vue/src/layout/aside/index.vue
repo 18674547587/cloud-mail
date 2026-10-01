@@ -64,6 +64,11 @@
           <Icon icon="eos-icons:system-ok-outlined" width="18" height="18" style="margin-left: 2px" />
           <span class="menu-name" style="margin-left: 22px">{{$t('SystemSettings')}}</span>
         </el-menu-item>
+        <el-menu-item @click="router.push({name: 'log'})" index="log" v-perm="'log:query'"
+                      :class="route.meta.name === 'log' ? 'choose-item' : ''">
+          <Icon icon="fe:list" width="18" height="18" style="margin-left: 2px" />
+          <span class="menu-name" style="margin-left: 22px">{{$t('logs')}}</span>
+        </el-menu-item>
       </el-menu>
     </div>
   </el-scrollbar>

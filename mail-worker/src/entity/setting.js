@@ -46,6 +46,12 @@ export const setting = sqliteTable('setting', {
 	tgMsgTo: text('tg_msg_to').default('show').notNull(),
 	tgMsgText: text('tg_msg_text').default('hide').notNull(),
 	minEmailPrefix: integer('min_email_prefix').default(0).notNull(),
-	emailPrefixFilter: text('email_prefix_filter').default('').notNull()
+	emailPrefixFilter: text('email_prefix_filter').default('').notNull(),
+	// 日志系统配置
+	logEnabled: integer('log_enabled').default(1).notNull(),
+	logAuditEnabled: integer('log_audit_enabled').default(1).notNull(),
+	logReqDays: integer('log_req_days').default(30).notNull(),
+	logAuditDays: integer('log_audit_days').default(0).notNull(),
+	logArchive: integer('log_archive').default(1).notNull()
 });
 export default setting

@@ -106,6 +106,7 @@ import {regKeyAdd, regKeyList, regKeyClearNotUse, regKeyDelete, regKeyHistory} f
 import {getTextWidth} from "@/utils/text.js";
 import dayjs from "dayjs";
 import {tzDayjs} from "@/utils/day.js";
+import {copyText} from "@/utils/clipboard-utils.js";
 import {useI18n} from "vue-i18n";
 
 defineOptions({
@@ -259,17 +260,17 @@ function getList(showLoading = false) {
 }
 
 async function copyCode(code) {
-  try {
-    await navigator.clipboard.writeText(code);
+  const ok = await copyText(code);
+  if (ok) {
     ElMessage({
       message: t('copySuccessMsg'),
       type: 'success',
       plain: true,
     })
-  } catch (err) {
-    console.error('复制失败:', err);
+  } else {
+    console.error(`${t('copyFailMsg')}: ${code}`);
     ElMessage({
-      message: '复制失败',
+      message: t('copyFailMsg'),
       type: 'error',
       plain: true,
     })

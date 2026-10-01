@@ -21,6 +21,33 @@ import domainUtils from '../utils/domain-uitls';
 import account from "../entity/account";
 import { att } from '../entity/att';
 import telegramService from './telegram-service';
+import fileUtils from '../utils/file-utils';
+
+// 附件体积上限（与前端 mail-vue/src/layout/write/index.vue 中的校验保持一致）
+// 依据：附件需经 base64 编码后整体进内存，解码时内存峰值约为文件体积的 3~4 倍，
+// 过大附件会触发 Worker 内存/CPU 超限，或超过 Resend 的单封邮件体积上限
+const MAX_ATT_SIZE = 10 * 1024 * 1024;
+const MAX_ATT_TOTAL_SIZE = 20 * 1024 * 1024;
+
+// 站外发信时，附件总体积超过该阈值就改为「下载链接」：
+// Resend 单封邮件上限 40MB（附件 base64 后计），Gmail 等收件方上限约 25MB，大文件当附件必然投递失败
+const OUTBOUND_ATTACHMENT_LIMIT = 15 * 1024 * 1024;
+
+// 分别发送（每个收件人单独一封）时，带附件的场景只能逐封调用 Resend API
+// （Resend 的 batch 接口不支持 attachments），而 Worker 单次请求的子请求数量有限
+// （免费计划 50 个），故对「分别发送 + 附件」的人数做限制
+const DIVIDE_ATTACH_MAX = 20;
+
+// Resend 回调的状态优先级：数值越大越接近"终态"
+// 用途：webhook 不保证顺序且失败会重试，需防止「已投递」被迟到的 delivery_delayed 回退
+const RESEND_STATUS_RANK = {
+	[emailConst.status.SENT]: 0,
+	[emailConst.status.DELAYED]: 1,
+	[emailConst.status.DELIVERED]: 2,
+	[emailConst.status.FAILED]: 3,
+	[emailConst.status.COMPLAINED]: 3,
+	[emailConst.status.BOUNCED]: 3
+};
 
 const emailService = {
 
@@ -157,6 +184,7 @@ const emailService = {
 			sendType, //发件类型
 			emailId, //邮件id，如果是回复邮件会带
 			receiveEmail, //收件人邮箱
+			manyType, //发件方式：'divide' 为分别发送（每个收件人单独一封，互相看不到邮箱）
 			text, //邮件纯文本
 			content, //邮件内容
 			subject, //邮件标题
@@ -165,7 +193,50 @@ const emailService = {
 
 		const { resendTokens, r2Domain, send, domainList } = await settingService.query(c);
 
+		// 正文内嵌图片数量预检：避免在 toImageUrlHtml 的解码阶段才发现超限（那时内存已经吃掉了）
+		const inlineImageCount = (content?.match(/data:image\//gi) || []).length;
+		if (inlineImageCount > 10) {
+			throw new BizError(t('imageAttLimit'));
+		}
+
 		let { imageDataList, html } = await attService.toImageUrlHtml(c, content);
+
+		// 附件/正文图片的校验必须前置：
+		// 原实现放在 resend.emails.send() 和入库之后，会导致邮件已经发出、附件却没保存，
+		// 用户却收到"发送失败"的提示；同时超大附件会直接撑爆 Worker 内存（整包 base64 进内存）
+		if (imageDataList.length > 10) {
+			throw new BizError(t('imageAttLimit'));
+		}
+
+		if (imageDataList.length > 0) {
+			const inlineTotalSize = imageDataList.reduce((sum, item) => sum + (item.size || 0), 0);
+			if (inlineTotalSize > MAX_ATT_TOTAL_SIZE) {
+				throw new BizError(t('attTotalSizeLimit'));
+			}
+		}
+
+		if (attachments?.length > 10) {
+			throw new BizError(t('attLimit'));
+		}
+
+		if (attachments?.length > 0) {
+			let totalInlineSize = 0;
+			for (let att of attachments) {
+				// 直传模式的附件不经过 Worker 内存，体积由 /att/presign 单独限制
+				if (att.key) {
+					continue;
+				}
+				// size 由前端提供，可能缺失或被伪造，这里用 base64 长度兜底估算
+				const attSize = Number(att.size) || Math.floor((att.content?.length || 0) * 3 / 4);
+				if (attSize > MAX_ATT_SIZE) {
+					throw new BizError(t('attSizeLimit'));
+				}
+				totalInlineSize += attSize;
+			}
+			if (totalInlineSize > MAX_ATT_TOTAL_SIZE) {
+				throw new BizError(t('attTotalSizeLimit'));
+			}
+		}
 
 		//判断是否关闭发件功能
 		if (send === settingConst.send.CLOSE) {
@@ -256,37 +327,118 @@ const emailService = {
 
 		}
 
+		// 分别发送：每个收件人单独一封，收件人之间互相看不到对方邮箱
+		// 只有一个收件人时与合并发送完全等价，无需拆分
+		const isDivide = manyType === 'divide' && receiveEmail.length > 1;
+
 		let resendResult = {};
+
+		// 分别发送时逐封发送的结果，顺序与 receiveEmail 一致
+		const divideResults = [];
+		const divideFailures = [];
 
 		//存在站外时邮箱全部由resend发送
 		if (!allInternal) {
 
-			const resend = new Resend(resendToken);
+			const origin = new URL(c.req.url).origin;
 
-			const sendForm = {
-				from: `${name} <${accountRow.email}>`,
-				to: [...receiveEmail],
-				subject: subject,
-				text: text,
-				html: html,
-				attachments: [...imageDataList, ...attachments]
-			};
+			// 附件总体积超阈值时改为下载链接：大文件作为附件在邮件协议层面投递不出去
+			let outboundAttachments = attachments || [];
 
-			if (sendType === 'reply') {
-				sendForm.headers = {
-					'in-reply-to': emailRow.messageId,
-					'references': emailRow.messageId
-				};
+			const outboundAttSize = outboundAttachments.reduce((sum, item) => sum + (Number(item.size) || 0), 0);
+
+			if (outboundAttachments.length > 0 && outboundAttSize > OUTBOUND_ATTACHMENT_LIMIT) {
+				html = this.appendDownloadLinks(html, outboundAttachments, origin);
+				outboundAttachments = [];
 			}
 
-			resendResult = await resend.emails.send(sendForm);
+			const resend = new Resend(resendToken);
+
+			const resendAttachments = [...imageDataList, ...this.toResendAttachments(outboundAttachments, origin)];
+
+			// to 只放传入的收件人：合并发送传全部，分别发送每次只传一个
+			const buildSendForm = (toList) => {
+
+				const form = {
+					from: `${name} <${accountRow.email}>`,
+					to: toList,
+					subject: subject,
+					text: text,
+					html: html,
+					attachments: resendAttachments
+				};
+
+				if (sendType === 'reply') {
+					form.headers = {
+						'in-reply-to': emailRow.messageId,
+						'references': emailRow.messageId
+					};
+				}
+
+				return form;
+
+			};
+
+			if (isDivide) {
+
+				if (resendAttachments.length > 0) {
+
+					// Resend 的 batch 接口不支持 attachments，只能逐封单发；
+					// 逐封单发会消耗与人数等量的子请求，故限制单次人数
+					if (receiveEmail.length > DIVIDE_ATTACH_MAX) {
+						throw new BizError(t('divideAttLimit', { count: DIVIDE_ATTACH_MAX }));
+					}
+
+					for (const item of receiveEmail) {
+
+						const singleResult = await resend.emails.send(buildSendForm([item]));
+
+						if (singleResult.error) {
+							divideFailures.push({ email: item, message: singleResult.error.message });
+							continue;
+						}
+
+						divideResults.push({ email: item, resendEmailId: singleResult.data?.id });
+
+					}
+
+				} else {
+
+					// 无附件时用 batch：不论多少收件人都只占 1 个子请求，避免 Worker 子请求数超限
+					for (let i = 0; i < receiveEmail.length; i += 100) {
+
+						const batchList = receiveEmail.slice(i, i + 100);
+
+						const batchResult = await resend.batch.send(batchList.map(item => buildSendForm([item])));
+
+						if (batchResult.error) {
+							divideFailures.push({ email: batchList.join(', '), message: batchResult.error.message });
+							continue;
+						}
+
+						// batch 返回的 id 顺序与请求顺序一致
+						const batchData = batchResult.data?.data || batchResult.data || [];
+
+						batchList.forEach((item, index) => {
+							divideResults.push({ email: item, resendEmailId: batchData[index]?.id });
+						});
+
+					}
+
+				}
+
+			} else {
+
+				resendResult = await resend.emails.send(buildSendForm([...receiveEmail]));
+
+			}
 
 		}
 
 		const { data, error } = resendResult;
 
 
-		if (error) {
+		if (!isDivide && error) {
 			throw new BizError(error.message);
 		}
 
@@ -296,30 +448,36 @@ const emailService = {
 		html = this.imgReplace(html, imageDataList, r2Domain);
 
 		//封装数据保存到数据库
-		const emailData = {};
-		emailData.sendEmail = accountRow.email;
-		emailData.name = name;
-		emailData.subject = subject;
-		emailData.content = html;
-		emailData.text = text;
-		emailData.accountId = accountId;
-		emailData.status = emailConst.status.SENT;
-		emailData.type = emailConst.type.SEND;
-		emailData.userId = userId;
-		emailData.resendEmailId = data?.id;
+		// recipient 只记录本条记录对应的收件人：分别发送时每封只写自己，
+		// 避免收件人在邮件详情页看到其他收件人的邮箱
+		const buildEmailData = (toList, resendEmailId) => {
 
-		const recipient = [];
+			const emailData = {};
+			emailData.sendEmail = accountRow.email;
+			emailData.name = name;
+			emailData.subject = subject;
+			emailData.content = html;
+			emailData.text = text;
+			emailData.accountId = accountId;
+			emailData.status = emailConst.status.SENT;
+			emailData.type = emailConst.type.SEND;
+			emailData.userId = userId;
+			emailData.resendEmailId = resendEmailId;
+			emailData.recipient = JSON.stringify(toList.map(item => ({ address: item, name: '' })));
 
-		receiveEmail.forEach(item => {
-			recipient.push({ address: item, name: '' });
-		});
+			if (sendType === 'reply') {
+				emailData.inReplyTo = emailRow.messageId;
+				emailData.relation = emailRow.messageId;
+			}
 
-		emailData.recipient = JSON.stringify(recipient);
+			return emailData;
 
-		if (sendType === 'reply') {
-			emailData.inReplyTo = emailRow.messageId;
-			emailData.relation = emailRow.messageId;
-		}
+		};
+
+		// 分别发送（站外）时每个收件人单独一条已发送记录，recipient 只含自己
+		const emailDataList = (isDivide && !allInternal)
+			? divideResults.map(item => buildEmailData([item.email], item.resendEmailId))
+			: [ buildEmailData(receiveEmail, data?.id) ];
 
 		//如果权限有发送次数增加用户发送次数
 		if (roleRow.sendCount && roleRow.sendType !== 'internal') {
@@ -327,30 +485,37 @@ const emailService = {
 		}
 
 		//保存到数据库并返回结果
-		const emailResult = await orm(c).insert(email).values(emailData).returning().get();
+		const emailResultList = [];
+		let firstAttList = [];
 
-		//保存内嵌附件
-		if (imageDataList.length > 0) {
-			if (imageDataList.length > 10) {
-				throw new BizError(t('imageAttLimit'));
+		for (const emailData of emailDataList) {
+
+			const emailResult = await orm(c).insert(email).values(emailData).returning().get();
+
+			//保存内嵌附件（数量已在发送前校验）
+			if (imageDataList.length > 0) {
+				await attService.saveArticleAtt(c, imageDataList, userId, accountId, emailResult.emailId);
 			}
-			await attService.saveArticleAtt(c, imageDataList, userId, accountId, emailResult.emailId);
-		}
 
-		//保存普通附件
-		if (attachments?.length > 0) {
-			if (attachments.length > 10) {
-				throw new BizError(t('attLimit'));
+			//保存普通附件（数量/体积已在发送前校验）
+			if (attachments?.length > 0) {
+				await attService.saveSendAtt(c, attachments, userId, accountId, emailResult.emailId);
 			}
-			await attService.saveSendAtt(c, attachments, userId, accountId, emailResult.emailId);
-		}
 
-		const attList = await attService.selectByEmailIds(c, [emailResult.emailId]);
-		emailResult.attList = attList;
+			const attList = await attService.selectByEmailIds(c, [emailResult.emailId]);
+			emailResult.attList = attList;
+
+			if (emailResultList.length === 0) {
+				firstAttList = attList;
+			}
+
+			emailResultList.push(emailResult);
+
+		}
 
 		//如果全是站内接收方，直接写入数据库
 		if (allInternal) {
-			await this.HandleOnSiteEmail(c, receiveEmail, emailResult, attList);
+			await this.HandleOnSiteEmail(c, receiveEmail, emailResultList[0], firstAttList, isDivide);
 		}
 
 		const dateStr = dayjs().format('YYYY-MM-DD');
@@ -364,11 +529,19 @@ const emailService = {
 			await c.env.kv.put(kvConst.SEND_DAY_COUNT + dateStr, JSON.stringify(daySendTotal), { expirationTtl: 60 * 60 * 24 });
 		}
 
-		return [ emailResult ];
+		// 分别发送时若有个别收件人发送失败：已成功的记录已经入库，这里统一抛出提示
+		if (divideFailures.length > 0) {
+			throw new BizError(t('divideSendPartial', {
+				success: divideResults.length,
+				emails: divideFailures.map(item => item.email).join(', ')
+			}));
+		}
+
+		return emailResultList;
 	},
 
 	//处理站内邮件发送
-	async HandleOnSiteEmail(c, receiveEmail, sendEmailData, attList) {
+	async HandleOnSiteEmail(c, receiveEmail, sendEmailData, attList, isDivide = false) {
 
 		const { noRecipient  } = await settingService.query(c);
 
@@ -391,6 +564,12 @@ const emailService = {
 			emailValues.toEmail = email;
 			emailValues.toName = emailUtils.getName(email);
 			emailValues.emailId = null;
+
+			// 分别发送时，收件记录只保留自己的地址，
+			// 避免站内收件人在详情页看到其他收件人的邮箱
+			if (isDivide) {
+				emailValues.recipient = JSON.stringify([{ address: email, name: '' }]);
+			}
 
 			const accountRow = accountList.find(accountRow => accountRow.email === email);
 
@@ -477,8 +656,51 @@ const emailService = {
 
 	},
 
-	imgReplace(content, cidAttList, r2domain) {
+	// 把直传的附件转成 Resend 可用的形式：用远程 URL 让它自行拉取，
+	// 避免把整个文件塞进 API 请求体（那正是内存超限与 40MB 上限的来源）
+	toResendAttachments(attachments, origin) {
 
+		return (attachments || []).map(att => {
+
+			if (att.key) {
+				return {
+					filename: att.filename,
+					// key 已包含 attachments/ 前缀，直接拼在站点根路径后
+					path: `${origin}/${att.key}`
+				};
+			}
+
+			return {
+				filename: att.filename,
+				content: att.content
+			};
+		});
+	},
+
+	// 附件过大时，在正文末尾追加下载链接
+	appendDownloadLinks(html, attachments, origin) {
+
+		const escape = (str) => String(str || '').replace(/[<>&"]/g, s => ({
+			'<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;'
+		}[s]));
+
+		const items = (attachments || []).map(att => {
+			// key 已包含 attachments/ 前缀
+			const url = `${origin}/${att.key}`;
+			return `<li><a href="${escape(url)}">${escape(att.filename)}</a>（${fileUtils.formatSize(att.size)}）</li>`;
+		}).join('');
+
+		const block = `
+<div style="margin-top:16px;padding:12px;border:1px solid #e5e7eb;border-radius:6px;">
+	<p style="margin:0 0 8px;font-weight:bold;">附件下载链接</p>
+	<p style="margin:0 0 8px;color:#6b7280;font-size:12px;">文件较大，未作为附件发送，请点击下方链接下载。</p>
+	<ul style="margin:0;padding-left:20px;">${items}</ul>
+</div>`;
+
+		return (html || '') + block;
+	},
+
+	imgReplace(content, cidAttList, r2domain) {
 		if (!content) {
 			return ''
 		}
@@ -571,8 +793,28 @@ const emailService = {
 		await orm(c).delete(email).where(inArray(email.userId, userIds)).run();
 	},
 
-	updateEmailStatus(c, params) {
+	async updateEmailStatus(c, params) {
 		const { status, resendEmailId, message } = params;
+
+		const current = await orm(c)
+			.select({ status: email.status })
+			.from(email)
+			.where(eq(email.resendEmailId, resendEmailId))
+			.get();
+
+		if (!current) {
+			return undefined;
+		}
+
+		// 状态优先级保护：只允许向更"终态"的方向流转，
+		// 避免 webhook 乱序/重试把已投递的邮件回退成「投递延迟」等早期状态
+		const currentRank = RESEND_STATUS_RANK[current.status] ?? 0;
+		const nextRank = RESEND_STATUS_RANK[status] ?? 0;
+
+		if (nextRank < currentRank) {
+			return current;
+		}
+
 		return orm(c).update(email).set({
 			status: status,
 			message: message

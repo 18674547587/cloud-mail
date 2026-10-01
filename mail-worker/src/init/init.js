@@ -28,8 +28,99 @@ const dbInit = {
 		await this.v2_7DB(c);
 		await this.v2_8DB(c);
 		await this.v2_9DB(c);
+		await this.v3_0DB(c);
 		await settingService.refresh(c);
 		return c.text('success');
+	},
+
+	/**
+	 * 日志系统（v3.0）
+	 *  - audit_log：关键操作审计（D1，长期保留）
+	 *  - log_stat_daily：每日聚合（D1，永久保留）
+	 *  - setting 增加日志配置字段
+	 *  - 新增权限点 log:query / log:export / log:delete
+	 */
+	async v3_0DB(c) {
+		try {
+			await c.env.db.batch([
+				c.env.db.prepare(`
+					CREATE TABLE IF NOT EXISTS audit_log (
+						log_id INTEGER PRIMARY KEY AUTOINCREMENT,
+						user_id INTEGER,
+						user_email TEXT,
+						action TEXT,
+						module TEXT,
+						method TEXT,
+						path TEXT,
+						status INTEGER,
+						duration INTEGER,
+						ip TEXT,
+						ua TEXT,
+						country TEXT,
+						ray_id TEXT,
+						target TEXT,
+						detail TEXT,
+						error TEXT,
+						created_at TEXT
+					)
+				`),
+				c.env.db.prepare(`CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at DESC)`),
+				c.env.db.prepare(`CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(user_id)`),
+				c.env.db.prepare(`CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action)`),
+				c.env.db.prepare(`
+					CREATE TABLE IF NOT EXISTS log_stat_daily (
+						stat_id INTEGER PRIMARY KEY AUTOINCREMENT,
+						stat_date TEXT NOT NULL,
+						path TEXT NOT NULL,
+						method TEXT,
+						status_group TEXT,
+						total INTEGER DEFAULT 0,
+						errors INTEGER DEFAULT 0,
+						avg_duration INTEGER DEFAULT 0,
+						max_duration INTEGER DEFAULT 0,
+						created_at TEXT
+					)
+				`),
+				c.env.db.prepare(`CREATE UNIQUE INDEX IF NOT EXISTS idx_stat_unique ON log_stat_daily(stat_date, path, method, status_group)`)
+			]);
+		} catch (e) {
+			console.warn(`日志表初始化跳过：${e.message}`);
+		}
+
+		const logColumns = [
+			`ALTER TABLE setting ADD COLUMN log_enabled INTEGER NOT NULL DEFAULT 1;`,
+			`ALTER TABLE setting ADD COLUMN log_audit_enabled INTEGER NOT NULL DEFAULT 1;`,
+			`ALTER TABLE setting ADD COLUMN log_req_days INTEGER NOT NULL DEFAULT 30;`,
+			`ALTER TABLE setting ADD COLUMN log_audit_days INTEGER NOT NULL DEFAULT 0;`,
+			`ALTER TABLE setting ADD COLUMN log_archive INTEGER NOT NULL DEFAULT 1;`
+		];
+
+		for (const sql of logColumns) {
+			try {
+				await c.env.db.prepare(sql).run();
+			} catch (e) {
+				console.warn(`跳过日志字段：${e.message}`);
+			}
+		}
+
+		try {
+			const exist = await c.env.db.prepare(`SELECT COUNT(*) AS total FROM perm WHERE perm_key = 'log:query'`).first();
+
+			if (!exist || exist.total === 0) {
+				await c.env.db.prepare(`INSERT INTO perm (name, perm_key, pid, type, sort) VALUES ('日志', NULL, 0, 1, 7)`).run();
+
+				const parent = await c.env.db.prepare(`SELECT perm_id FROM perm WHERE name = '日志' AND type = 1 AND pid = 0 ORDER BY perm_id DESC LIMIT 1`).first();
+				const pid = parent.perm_id;
+
+				await c.env.db.batch([
+					c.env.db.prepare(`INSERT INTO perm (name, perm_key, pid, type, sort) VALUES ('日志查看','log:query',?,2,0)`).bind(pid),
+					c.env.db.prepare(`INSERT INTO perm (name, perm_key, pid, type, sort) VALUES ('日志导出','log:export',?,2,1)`).bind(pid),
+					c.env.db.prepare(`INSERT INTO perm (name, perm_key, pid, type, sort) VALUES ('日志清理','log:delete',?,2,2)`).bind(pid)
+				]);
+			}
+		} catch (e) {
+			console.warn(`日志权限初始化跳过：${e.message}`);
+		}
 	},
 
 	async v2_9DB(c) {

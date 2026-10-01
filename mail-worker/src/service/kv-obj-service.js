@@ -21,13 +21,23 @@ const kvObjService = {
 
 		const obj = await c.env.kv.getWithMetadata(key, { type: "arrayBuffer"});
 
-		return new Response(obj.value, {
-			headers: {
-				'Content-Type': obj.metadata?.contentType || 'application/octet-stream',
-				'Content-Disposition': obj.metadata?.contentDisposition || null,
-				'Cache-Control': obj.metadata?.cacheControl || null
-			}
-		});
+		if (obj.value === null || obj.value === undefined) {
+			return new Response('Not Found', { status: 404 });
+		}
+
+		const headers = {
+			'Content-Type': obj.metadata?.contentType || 'application/octet-stream'
+		};
+
+		if (obj.metadata?.contentDisposition) {
+			headers['Content-Disposition'] = obj.metadata.contentDisposition;
+		}
+
+		if (obj.metadata?.cacheControl) {
+			headers['Cache-Control'] = obj.metadata.cacheControl;
+		}
+
+		return new Response(obj.value, { headers });
 
 	}
 

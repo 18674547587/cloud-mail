@@ -3,37 +3,54 @@ main = "src/index.js"
 compatibility_date = "2025-06-04"
 keep_vars = true
 
+# 禁用 workers.dev（国内被运营商阻断）与预览 URL，避免多余路由
+workers_dev = false
+preview_urls = false
+
 [observability]
 enabled = true
 
-#[[d1_databases]]
-#binding = "db"			#d1数据库绑定名默认不可修改
-#database_name = ""		#d1数据库名字
-#database_id = ""		#d1数据库id
+# ============ Analytics Engine：请求明细日志 ============
+[[analytics_engine_datasets]]
+binding = "LOGS"
+dataset = "cloudmail_logs"
 
-#[[kv_namespaces]]
-#binding = "kv"			#kv绑定名默认不可修改
-#id = ""					#kv数据库id
+# ============ Durable Objects：邮件实时推送 ============
+[[durable_objects.bindings]]
+name = "MAIL_PUSH"
+class_name = "MailPush"
 
-#[[r2_buckets]]
-#binding = "r2"			#r2对象存储绑定名默认不可修改
-#bucket_name = ""		#r2对象存储桶的名字
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["MailPush"]
+
+# ============ D1（cloud-mail-apac） ============
+[[d1_databases]]
+binding = "db"
+database_name = "cloud-mail-apac"
+database_id = "f8bda999-beba-4713-a2cb-bb4c8b93fd41"
+
+# ============ KV ============
+[[kv_namespaces]]
+binding = "kv"
+id = "fab772c76ab34907bc07307a2703ca4a"
+
+# ============ R2：日志归档 ============
+[[r2_buckets]]
+binding = "r2"
+bucket_name = "cloudmail-apac"
 
 [assets]
-binding = "assets"		#静态资源绑定名默认不可修改
-directory = "./dist"	#前端vue项目打包的静态资源存放位置,默认dist
+binding = "assets"
+directory = "./dist"
 not_found_handling = "single-page-application"
 run_worker_first = true
 
 [triggers]
-crons = ["0 16 * * *"]	#定时任务每天晚上12点执行
+crons = ["0 16 * * *"]
 
+[vars]
+ae_account_id = "2727c2497da23edfb588b6b979464aee"
+admin = "admin@1206201.xyz"
+domain = "95270.cc.cd,1622.cc.cd,a.260040.xyz,1206201.xyz"
 
-#[vars]
-#orm_log = false
-#domain = []				#邮件域名可可配置多个 示例: ["example1.com","example2.com"]
-#admin = ""				#管理员的邮箱	示例: admin@example.com
-#jwt_secret = ""			#jwt令牌的密钥,随便填一串字符串
-
-[build]
-command = "pnpm --prefix ../mail-vue install && pnpm --prefix ../mail-vue run build"

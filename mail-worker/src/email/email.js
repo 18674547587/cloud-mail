@@ -131,6 +131,25 @@ export async function email(message, env, ctx) {
 
 		emailRow = await emailService.completeReceive({ env }, account ? emailConst.status.RECEIVE : emailConst.status.NOONE, emailRow.emailId);
 
+		// 实时推送：通知该用户的在线网页有新邮件
+		// 用户不在线时 DO 内部直接返回，不下发任何内容
+		try {
+			if (env.MAIL_PUSH && emailRow.userId) {
+				const pushId = env.MAIL_PUSH.idFromName('u-' + emailRow.userId);
+				await env.MAIL_PUSH.get(pushId).fetch('https://mail-push.internal/notify', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({
+						emailId: emailRow.emailId,
+						accountId: emailRow.accountId,
+						userId: emailRow.userId
+					})
+				});
+			}
+		} catch (e) {
+			console.error('实时推送失败：', e);
+		}
+
 
 		if (ruleType === settingConst.ruleType.RULE) {
 
