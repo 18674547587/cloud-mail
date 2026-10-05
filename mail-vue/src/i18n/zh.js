@@ -399,6 +399,17 @@ const zh = {
     authRaw: '原始认证头',
     authPass: '通过',
     authFail: '失败',
-    authUnknown: '未知'
+    authUnknown: '未知',
+    authSpamScore: '垃圾评分',
+    authAligned: '对齐',
+    authAlgo: '算法',
+    authCanon: '规范化',
+    authQuery: '查询方式',
+    authSignedAt: '签名时间',
+    authSigHash: '签名哈希',
+    authBodyHash: 'Body 哈希',
+    authHeaders: '覆盖头',
+    authSegments: '验证明细',
+    authReceived: 'Received 传递路径'
 }
 export default zh

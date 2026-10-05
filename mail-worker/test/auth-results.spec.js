@@ -1,12 +1,13 @@
 /**
- * 邮件认证结果（SPF/DKIM/DMARC）解析器单元测试
+ * 邮件认证结果（SPF/DKIM/DMARC/ARC）解析器单元测试 —— v2 详细字段版
  *
- * 样本 1 为 2026-10-05 线上实测的真实邮件头（Cloudflare Email Routing 写入）。
+ * 样本 1 为 2026-10-05 线上实测的真实邮件头（Cloudflare Email Routing 写入），
+ * 包含 DKIM-Signature / ARC 链 / Received / X-CF-SpamH-Score 的完整内容。
  */
 import { describe, it, expect } from 'vitest';
 import authResultsUtils from '../src/utils/auth-results-utils.js';
 
-// ===== 样本 1：线上实测（Resend → Cloudflare Email Routing → cloud-mail） =====
+// ===== 样本 1：线上实测完整头（Resend → Cloudflare Email Routing → cloud-mail） =====
 const REAL_SAMPLE = `Received: from e234-53.smtp-out.ap-northeast-1.amazonses.com (23.251.234.53)
         by cloudflare-email.net (cloudflare) id 8mKYJccFWNie
         for <admin@1206201.xyz>; Mon, 05 Oct 2026 05:38:55 +0000
@@ -22,6 +23,8 @@ ARC-Authentication-Results: i=1; mx.cloudflare.net;
 \tspf=pass (mx.cloudflare.net: domain of postmaster@e234-53.smtp-out.ap-northeast-1.amazonses.com designates 23.251.234.53 as permitted sender) smtp.helo=e234-53.smtp-out.ap-northeast-1.amazonses.com;
 \tspf=pass (mx.cloudflare.net: domain of 010601a10a927f10-8e69e9ce-3fd0-4871-aec7-2e2141cce5e8-000000@send.95270.cc.cd designates 23.251.234.53 as permitted sender) smtp.mailfrom=010601a10a927f10-8e69e9ce-3fd0-4871-aec7-2e2141cce5e8-000000@send.95270.cc.cd;
 \tarc=none smtp.remote-ip=23.251.234.53
+Received-SPF: pass (mx.cloudflare.net: domain of 010601a10a927f10-8e69e9ce-3fd0-4871-aec7-2e2141cce5e8-000000@send.95270.cc.cd designates 23.251.234.53 as permitted sender)
+\treceiver=mx.cloudflare.net; client-ip=23.251.234.53; envelope-from="010601a10a927f10-8e69e9ce-3fd0-4871-aec7-2e2141cce5e8-000000@send.95270.cc.cd"; helo=e234-53.smtp-out.ap-northeast-1.amazonses.com;
 Authentication-Results: mx.cloudflare.net;
 \tdkim=pass header.d=95270.cc.cd header.s=resend header.b=JPqCTZZB;
 \tdkim=pass header.d=amazonses.com header.s=zh4gjftm6etwoq6afzugpky45synznly header.b=d8suBF47;
@@ -29,15 +32,29 @@ Authentication-Results: mx.cloudflare.net;
 \tspf=pass (mx.cloudflare.net: domain of postmaster@e234-53.smtp-out.ap-northeast-1.amazonses.com designates 23.251.234.53 as permitted sender) smtp.helo=e234-53.smtp-out.ap-northeast-1.amazonses.com;
 \tspf=pass (mx.cloudflare.net: domain of 010601a10a927f10-8e69e9ce-3fd0-4871-aec7-2e2141cce5e8-000000@send.95270.cc.cd designates 23.251.234.53 as permitted sender) smtp.mailfrom=010601a10a927f10-8e69e9ce-3fd0-4871-aec7-2e2141cce5e8-000000@send.95270.cc.cd;
 \tarc=none smtp.remote-ip=23.251.234.53
-Received-SPF: pass (mx.cloudflare.net: domain of 010601a10a927f10-8e69e9ce-3fd0-4871-aec7-2e2141cce5e8-000000@send.95270.cc.cd designates 23.251.234.53 as permitted sender)
-\treceiver=mx.cloudflare.net; client-ip=23.251.234.53; envelope-from="010601a10a927f10-8e69e9ce-3fd0-4871-aec7-2e2141cce5e8-000000@send.95270.cc.cd"; helo=e234-53.smtp-out.ap-northeast-1.amazonses.com;
-Subject: 认证头探针测试-95270
+X-CF-SpamH-Score: 2
+DKIM-Signature: v=1; a=rsa-sha256; q=dns/txt; c=relaxed/simple; s=resend;
+\td=95270.cc.cd; t=1791178735;
+\th=From:To:Subject:Message-ID:Content-Transfer-Encoding:Date:MIME-Version:Content-Type;
+\tbh=04xlKIuf3PcMTfWoyxi4f1FqEDPt8DrW8i60i2tnayg=;
+\tb=JPqCTZZBjWVbohMGHgnZeP/yZi+QhC3hVcghODcqgowdXq+ZxL1ov3R11nH6tHdZ
+\tUESZPJoempDxgf4PiUbxPx9Y9Gsh+iCm6FtpQF6WkN8yJE9RbV4+yrEoxR9ZhMSex/A
+\tHv7+1rRMiLHtb5Lawpg12Y/qK7fAz/I72nC4nrWs=
+DKIM-Signature: v=1; a=rsa-sha256; q=dns/txt; c=relaxed/simple;
+\ts=zh4gjftm6etwoq6afzugpky45synznly; d=amazonses.com; t=1791178735;
+\th=From:To:Subject:Message-ID:Content-Transfer-Encoding:Date:MIME-Version:Content-Type:Feedback-ID;
+\tbh=04xlKIuf3PcMTfWoyxi4f1FqEDPt8DrW8i60i2tnayg=;
+\tb=d8suBF47UYQdHPyOffoj92wHyiBn5G0dfEOo4L3AvVywqVM81FsIJCasaN8K0C6K
+\tm1Gj8aYGM3i33tQF3y21q0MYLqEXZQvZtv0wf+Zq4i12pKBtD9gF9cnJhVzZxpdIudF
+\t89NLHrxf0ADdXNFHKkXqmtgsyalcH8L5V+BaWJZk=
 From: ai@95270.cc.cd
 To: admin@1206201.xyz
+Subject: 认证头探针测试-95270
+Date: Mon, 5 Oct 2026 05:38:55 +0000
 
 这是一封测试邮件的正文。`;
 
-describe('auth-results-utils.parse —— 实测样本', () => {
+describe('auth-results-utils.parse —— 实测样本（基础）', () => {
 	const r = authResultsUtils.parse(REAL_SAMPLE);
 
 	it('识别主来源为 mx.cloudflare.net', () => {
@@ -54,8 +71,8 @@ describe('auth-results-utils.parse —— 实测样本', () => {
 
 	it('DKIM 两个签名均解析', () => {
 		expect(r.dkim).toHaveLength(2);
-		expect(r.dkim[0]).toEqual({ result: 'pass', domain: '95270.cc.cd', selector: 'resend' });
-		expect(r.dkim[1]).toEqual({ result: 'pass', domain: 'amazonses.com', selector: 'zh4gjftm6etwoq6afzugpky45synznly' });
+		expect(r.dkim[0]).toMatchObject({ result: 'pass', domain: '95270.cc.cd', selector: 'resend' });
+		expect(r.dkim[1]).toMatchObject({ result: 'pass', domain: 'amazonses.com', selector: 'zh4gjftm6etwoq6afzugpky45synznly' });
 	});
 
 	it('DMARC 结果与策略', () => {
@@ -69,9 +86,61 @@ describe('auth-results-utils.parse —— 实测样本', () => {
 		expect(r.remoteIp).toBe('23.251.234.53');
 	});
 
-	it('保留认证头原文', () => {
+	it('保留认证头原文（含 DKIM-Signature 全文）', () => {
 		expect(r.raw).toContain('Authentication-Results: mx.cloudflare.net;');
 		expect(r.raw).toContain('Received-SPF: pass');
+		expect(r.raw).toContain('DKIM-Signature: v=1; a=rsa-sha256');
+		expect(r.raw).toContain('ARC-Seal: i=1;');
+	});
+});
+
+describe('auth-results-utils.parse —— v2 详细字段', () => {
+	const r = authResultsUtils.parse(REAL_SAMPLE);
+
+	it('SPF 分段：helo 与 mailfrom 分别解析', () => {
+		expect(r.spf.segments).toHaveLength(2);
+		const helo = r.spf.segments.find((s) => s.type === 'helo');
+		const mailfrom = r.spf.segments.find((s) => s.type === 'mailfrom');
+		expect(helo.value).toBe('e234-53.smtp-out.ap-northeast-1.amazonses.com');
+		expect(helo.result).toBe('pass');
+		expect(helo.reason).toContain('designates 23.251.234.53 as permitted sender');
+		expect(mailfrom.value).toContain('@send.95270.cc.cd');
+		expect(mailfrom.result).toBe('pass');
+	});
+
+	it('DKIM 签名详情（算法/时间/bodyHash/覆盖头/规范化）', () => {
+		const sig = r.dkim[0];
+		expect(sig.algorithm).toBe('rsa-sha256');
+		expect(sig.canon).toBe('relaxed/simple');
+		expect(sig.query).toBe('dns/txt');
+		expect(sig.timestamp).toBe(1791178735);
+		expect(sig.bodyHash).toBe('04xlKIuf3PcMTfWoyxi4f1FqEDPt8DrW8i60i2tnayg=');
+		expect(sig.headers).toBe('From:To:Subject:Message-ID:Content-Transfer-Encoding:Date:MIME-Version:Content-Type');
+		expect(sig.sigHash).toBe('JPqCTZZB');
+	});
+
+	it('DMARC 对齐判断（SPF / DKIM 均对齐）', () => {
+		expect(r.dmarc.spfAligned).toBe(true);
+		expect(r.dmarc.dkimAligned).toBe(true);
+	});
+
+	it('ARC 链（i=1 的 seal / ams / aar）', () => {
+		expect(r.arcChain).toHaveLength(1);
+		const link = r.arcChain[0];
+		expect(link.instance).toBe(1);
+		expect(link.seal).toMatchObject({ cv: 'none', d: 'cloudflare-email.net', s: 'cf2024-1', a: 'rsa-sha256' });
+		expect(link.ams).toMatchObject({ d: 'cloudflare-email.net', s: 'cf2024-1' });
+		expect(link.aar).toContain('i=1; mx.cloudflare.net;');
+	});
+
+	it('Received 传递路径', () => {
+		expect(r.received).toHaveLength(1);
+		expect(r.received[0]).toContain('from e234-53.smtp-out.ap-northeast-1.amazonses.com');
+		expect(r.received[0]).toContain('by cloudflare-email.net');
+	});
+
+	it('Cloudflare 垃圾评分', () => {
+		expect(r.spamScore).toBe('2');
 	});
 });
 
@@ -100,7 +169,7 @@ body`;
 		expect(r.spf.helo).toBe('mail.example.com');
 	});
 
-	it('失败场景（spf=fail / dkim=fail / dmarc=fail）', () => {
+	it('失败场景（spf=fail / dkim=fail / dmarc=fail）+ 对齐失败', () => {
 		const raw = `Authentication-Results: mx.cloudflare.net;
 \tdkim=fail (bad signature) header.d=evil.example header.s=s1;
 \tdmarc=fail header.from=evil.example policy.dmarc=reject;
@@ -111,9 +180,25 @@ Subject: t
 body`;
 		const r = authResultsUtils.parse(raw);
 		expect(r.spf.result).toBe('fail');
-		expect(r.dkim[0]).toEqual({ result: 'fail', domain: 'evil.example', selector: 's1' });
+		expect(r.dkim[0]).toMatchObject({ result: 'fail', domain: 'evil.example', selector: 's1' });
 		expect(r.dmarc.result).toBe('fail');
 		expect(r.dmarc.policy).toBe('reject');
+		expect(r.dmarc.spfAligned).toBe(true);
+		expect(r.dmarc.dkimAligned).toBe(true);
+	});
+
+	it('对齐失败场景（签名域与 From 域不一致）', () => {
+		const raw = `Authentication-Results: mx.cloudflare.net;
+\tdkim=pass header.d=mailer.other.net header.s=s1;
+\tdmarc=fail header.from=example.com policy.dmarc=reject;
+\tspf=pass (mx.cloudflare.net: domain of bounce@send.other.net designates 5.6.7.8 as permitted sender) smtp.mailfrom=bounce@send.other.net;
+\tarc=none smtp.remote-ip=5.6.7.8
+Subject: t
+
+body`;
+		const r = authResultsUtils.parse(raw);
+		expect(r.dmarc.spfAligned).toBe(false);
+		expect(r.dmarc.dkimAligned).toBe(false);
 	});
 
 	it('多个 Authentication-Results 时优先 Cloudflare', () => {
@@ -126,6 +211,17 @@ body`;
 		expect(r.source).toBe('mx.cloudflare.net');
 		expect(r.spf.result).toBe('fail');
 		expect(r.dkim).toHaveLength(1);
+	});
+
+	it('SPF 段顺序反转时（mailfrom 在前）结果仍取 mailfrom 段', () => {
+		const raw = `Authentication-Results: mx.cloudflare.net;
+\tspf=pass (mx.cloudflare.net: domain of a@b.c designates 9.9.9.9 as permitted sender) smtp.mailfrom=a@b.c;
+\tspf=none (mx.cloudflare.net: no SPF records found for postmaster@helo.example) smtp.helo=helo.example
+Subject: t
+
+body`;
+		const r = authResultsUtils.parse(raw);
+		expect(r.spf.result).toBe('pass');
 	});
 
 	it('DKIM 无签名（neutral）也能解析', () => {
@@ -147,7 +243,7 @@ Subject: t
 
 body`;
 		const r = authResultsUtils.parse(raw);
-		expect(r.dkim[0]).toEqual({ result: 'pass', domain: 'gmail.com', selector: '20230601' });
+		expect(r.dkim[0]).toMatchObject({ result: 'pass', domain: 'gmail.com', selector: '20230601' });
 	});
 
 	it('折行头部的提取不丢失（折叠行合并）', () => {

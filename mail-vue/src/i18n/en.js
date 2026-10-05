@@ -399,7 +399,18 @@ const en = {
     authRaw: 'Raw headers',
     authPass: 'Pass',
     authFail: 'Fail',
-    authUnknown: 'Unknown'
+    authUnknown: 'Unknown',
+    authSpamScore: 'Spam score',
+    authAligned: 'Alignment',
+    authAlgo: 'Algorithm',
+    authCanon: 'Canonicalization',
+    authQuery: 'Query',
+    authSignedAt: 'Signed at',
+    authSigHash: 'Signature hash',
+    authBodyHash: 'Body hash',
+    authHeaders: 'Signed headers',
+    authSegments: 'SPF details',
+    authReceived: 'Received chain'
 }
 
 export default en
