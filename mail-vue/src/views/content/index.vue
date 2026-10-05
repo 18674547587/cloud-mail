@@ -29,6 +29,7 @@
               <div class="date">
                 <div>{{ formatDetailDate(email.createTime) }}</div>
               </div>
+              <AuthBadge :auth-results="email.authResults" />
             </div>
             <el-alert v-if="email.status === 3" :closable="false" :title="toMessage(email.message)" class="email-msg" type="error" show-icon />
             <el-alert v-if="email.status === 4" :closable="false" :title="$t('complained')" class="email-msg" type="warning" show-icon />
@@ -75,6 +76,7 @@
 </template>
 <script setup>
 import ShadowHtml from '@/components/shadow-html/index.vue'
+import AuthBadge from '@/components/auth-badge/index.vue'
 import {reactive, ref, watch, onMounted, onUnmounted} from "vue";
 import {useRouter} from 'vue-router'
 import {ElMessage, ElMessageBox} from 'element-plus'

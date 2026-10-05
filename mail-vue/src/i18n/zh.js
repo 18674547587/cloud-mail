@@ -386,6 +386,19 @@ const zh = {
     searchUser: '搜索用户',
     searchEmail: '搜索邮箱',
     searchSender: '搜索发件人',
-    userEmail: '用户邮箱'
+    userEmail: '用户邮箱',
+    authCheck: '邮件认证',
+    authDetailTitle: '邮件认证信息',
+    authSource: '验证来源',
+    authSenderIp: '发件 IP',
+    authMailfrom: '信封发件人',
+    authDomain: '签名域',
+    authSelector: '选择器',
+    authDmarcFrom: '对齐域',
+    authPolicy: '策略',
+    authRaw: '原始认证头',
+    authPass: '通过',
+    authFail: '失败',
+    authUnknown: '未知'
 }
 export default zh

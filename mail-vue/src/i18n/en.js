@@ -386,7 +386,20 @@ const en = {
     searchUser: 'Search by user',
     searchEmail: 'Search by Email',
     searchSender: 'Search by Sender',
-    userEmail: 'Email Address'
+    userEmail: 'Email Address',
+    authCheck: 'Email auth',
+    authDetailTitle: 'Email Authentication',
+    authSource: 'Verified by',
+    authSenderIp: 'Sender IP',
+    authMailfrom: 'Envelope sender',
+    authDomain: 'Domain',
+    authSelector: 'Selector',
+    authDmarcFrom: 'Aligned domain',
+    authPolicy: 'Policy',
+    authRaw: 'Raw headers',
+    authPass: 'Pass',
+    authFail: 'Fail',
+    authUnknown: 'Unknown'
 }
 
 export default en

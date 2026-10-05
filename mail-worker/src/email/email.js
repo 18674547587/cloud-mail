@@ -5,6 +5,7 @@ import settingService from '../service/setting-service';
 import attService from '../service/att-service';
 import constant from '../const/constant';
 import fileUtils from '../utils/file-utils';
+import authResultsUtils from '../utils/auth-results-utils';
 import { emailConst, isDel, settingConst } from '../const/entity-const';
 import emailUtils from '../utils/email-utils';
 import roleService from '../service/role-service';
@@ -43,6 +44,14 @@ export async function email(message, env, ctx) {
 		}
 
 		const email = await PostalMime.parse(content);
+
+		// 解析邮件认证结果（SPF/DKIM/DMARC），解析失败不影响收件
+		let authResults = null;
+		try {
+			authResults = authResultsUtils.parse(content);
+		} catch (e) {
+			console.error('邮件认证结果解析失败：', e);
+		}
 
 		const account = await accountService.selectByEmailIncludeDel({ env: env }, message.to);
 
@@ -97,7 +106,8 @@ export async function email(message, env, ctx) {
 			userId: account ? account.userId : 0,
 			accountId: account ? account.accountId : 0,
 			isDel: isDel.DELETE,
-			status: emailConst.status.SAVING
+			status: emailConst.status.SAVING,
+			authResults: authResults ? JSON.stringify(authResults) : null
 		};
 
 		const attachments = [];
