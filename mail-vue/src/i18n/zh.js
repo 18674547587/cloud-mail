@@ -222,6 +222,12 @@ const zh = {
     addOsDomain: '添加域名',
     domainDesc: '域名',
     addTurnstileSecret: '添加 Turnstile 密钥',
+    addHcaptchaSecret: '添加 hCaptcha 密钥',
+    captchaProviderSetting: '验证方式',
+    captchaProviderAuto: '自动（中国大陆用 hCaptcha）',
+    captchaProviderFollowDefault: '跟随默认',
+    captchaProviderTurnstile: 'Turnstile',
+    captchaProviderHcaptcha: 'hCaptcha',
     backgroundTitle: '设置背景',
     tgBotDesc: '可以将接收的邮件转发到Tg机器人',
     tgBotToken: '机器人 token',
@@ -410,6 +416,23 @@ const zh = {
     authBodyHash: 'Body 哈希',
     authHeaders: '覆盖头',
     authSegments: '验证明细',
-    authReceived: 'Received 传递路径'
+    authReceived: 'Received 传递路径',
+
+    // ===== 设备令牌管理 =====
+    deviceManage: '设备管理',
+    deviceManageTip: '设备令牌用于 Android 客户端登录（无需人机验证），可随时单独吊销。为安全起见，明文令牌仅在创建时显示一次。',
+    createDeviceToken: '生成新设备令牌',
+    deviceName: '设备名称',
+    deviceNamePlaceholder: '例如：我的小米手机',
+    createTime: '创建时间',
+    lastUsedTime: '最后使用',
+    neverUsed: '从未使用',
+    deviceEmpty: '暂无已授权的设备',
+    operate: '操作',
+    revoke: '吊销',
+    revokeConfirm: '确定吊销该设备令牌？吊销后该设备将立即无法登录。',
+    revokeSuccessMsg: '已吊销',
+    tokenCreatedTitle: '令牌创建成功',
+    tokenOnceTip: '请立即复制并妥善保存，关闭后无法再次查看此令牌。'
 }
 export default zh

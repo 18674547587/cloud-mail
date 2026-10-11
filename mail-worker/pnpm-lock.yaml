@@ -16,7 +16,7 @@ importers:
         version: 3.1138.0
       '@cloudflare/vite-plugin':
         specifier: 1.6.0
-        version: 1.6.0(rollup@4.50.0)(vite@6.3.5(@types/node@24.3.0))(workerd@1.20250823.0)(wrangler@4.33.1)
+        version: 1.6.0(rollup@4.50.0)(vite@6.3.5(@types/node@24.3.0))(workerd@1.20250310.0)(wrangler@4.33.1)
       aws4fetch:
         specifier: 1.0.20
         version: 1.0.20
@@ -54,9 +54,6 @@ importers:
       vitest:
         specifier: ~3.0.7
         version: 3.0.9(@types/node@24.3.0)(supports-color@10.2.0)
-      wrangler:
-        specifier: ^4.7.0
-        version: 4.33.1
 
 packages:
 
@@ -2886,11 +2883,11 @@ snapshots:
     optionalDependencies:
       workerd: 1.20250310.0
 
-  '@cloudflare/unenv-preset@2.3.2(unenv@2.0.0-rc.17)(workerd@1.20250823.0)':
+  '@cloudflare/unenv-preset@2.3.2(unenv@2.0.0-rc.17)(workerd@1.20250310.0)':
     dependencies:
       unenv: 2.0.0-rc.17
     optionalDependencies:
-      workerd: 1.20250823.0
+      workerd: 1.20250310.0
 
   '@cloudflare/unenv-preset@2.7.0(unenv@2.0.0-rc.19)(workerd@1.20250823.0)':
     dependencies:
@@ -2898,9 +2895,9 @@ snapshots:
     optionalDependencies:
       workerd: 1.20250823.0
 
-  '@cloudflare/vite-plugin@1.6.0(rollup@4.50.0)(vite@6.3.5(@types/node@24.3.0))(workerd@1.20250823.0)(wrangler@4.33.1)':
+  '@cloudflare/vite-plugin@1.6.0(rollup@4.50.0)(vite@6.3.5(@types/node@24.3.0))(workerd@1.20250310.0)(wrangler@4.33.1)':
     dependencies:
-      '@cloudflare/unenv-preset': 2.3.2(unenv@2.0.0-rc.17)(workerd@1.20250823.0)
+      '@cloudflare/unenv-preset': 2.3.2(unenv@2.0.0-rc.17)(workerd@1.20250310.0)
       '@mjackson/node-fetch-server': 0.6.1
       '@rollup/plugin-replace': 6.0.2(rollup@4.50.0)
       get-port: 7.1.0

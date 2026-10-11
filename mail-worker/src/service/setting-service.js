@@ -9,6 +9,7 @@ import BizError from '../error/biz-error';
 import {t} from '../i18n/i18n'
 import verifyRecordService from './verify-record-service';
 import domainUtils from '../utils/domain-uitls';
+import { countryOf, decideProvider, pickUsableProvider } from '../utils/captcha-utils';
 
 const settingService = {
 
@@ -91,9 +92,11 @@ const settingService = {
 
 		if (!showSiteKey) {
 			settingRow.siteKey = settingRow.siteKey ? `${settingRow.siteKey.slice(0, 6)}******` : null;
+			settingRow.hcaptchaSiteKey = settingRow.hcaptchaSiteKey ? `${settingRow.hcaptchaSiteKey.slice(0, 6)}******` : null;
 		}
 
 		settingRow.secretKey = settingRow.secretKey ? `${settingRow.secretKey.slice(0, 6)}******` : null;
+		settingRow.hcaptchaSecretKey = settingRow.hcaptchaSecretKey ? `${settingRow.hcaptchaSecretKey.slice(0, 6)}******` : null;
 
 		Object.keys(settingRow.resendTokens).forEach(key => {
 			settingRow.resendTokens[key] = `${settingRow.resendTokens[key].slice(0, 12)}******`;
@@ -188,6 +191,16 @@ const settingService = {
 
 		const settingRow = await this.get(c, true);
 
+		// 未登录口径的人机验证 provider（全局强制 → 访客 IP；未登录无用户偏好）
+		const captchaProvider = pickUsableProvider(
+			settingRow,
+			decideProvider({
+				globalProvider: settingRow.captchaProvider || 0,
+				userProvider: 0,
+				country: countryOf(c)
+			})
+		);
+
 		return {
 			register: settingRow.register,
 			title: settingRow.title,
@@ -199,6 +212,8 @@ const settingService = {
 			send: settingRow.send,
 			r2Domain: settingRow.r2Domain,
 			siteKey: settingRow.siteKey,
+			hcaptchaSiteKey: settingRow.hcaptchaSiteKey,
+			captchaProvider,
 			background: settingRow.background,
 			loginOpacity: settingRow.loginOpacity,
 			domainList: settingRow.domainList,

@@ -27,3 +27,4 @@ mail-vue/dist
 .venv
 # 临时部署配置（含明文密钥，切勿提交）
 wrangler-deploy.toml
+wrangler-prod.toml

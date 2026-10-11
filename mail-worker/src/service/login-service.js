@@ -13,7 +13,7 @@ import accountService from './account-service';
 import settingService from './setting-service';
 import saltHashUtils from '../utils/crypto-utils';
 import cryptoUtils from '../utils/crypto-utils';
-import turnstileService from './turnstile-service';
+import captchaProviderService from './captcha-provider-service';
 import roleService from './role-service';
 import regKeyService from './reg-key-service';
 import dayjs from 'dayjs';
@@ -117,13 +117,13 @@ const loginService = {
 
 		if (registerVerify === settingConst.registerVerify.OPEN) {
 			regVerifyOpen = true
-			await turnstileService.verify(c,token)
+			await captchaProviderService.verify(c, token, { action: 'register' })
 		}
 
 		if (registerVerify === settingConst.registerVerify.COUNT) {
 			regVerifyOpen = await verifyRecordService.isOpenRegVerify(c, regVerifyCount);
 			if (regVerifyOpen) {
-				await turnstileService.verify(c,token)
+				await captchaProviderService.verify(c, token, { action: 'register' })
 			}
 		}
 

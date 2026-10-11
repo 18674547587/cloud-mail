@@ -25,8 +25,17 @@ export default {
 		}
 
 		if (url.pathname.startsWith('/api/')) {
+
+			// 兼容层（2026-10-10）：旧版 Android App 的 baseUrl 已含 /api，
+			// 而 Retrofit 接口注解又写成 "api/xxx"，两者拼接会得到 /api/api/xxx。
+			// 这里剥掉重复的一层，避免为了修一个前缀就必须重新打包 APK。
+			// 注意：只影响以 /api/api/ 开头的路径，正常请求不受任何影响。
+			if (url.pathname.startsWith('/api/api/')) {
+				url.pathname = url.pathname.substring(4)
+			}
+
 			url.pathname = url.pathname.replace('/api', '')
-			req = new Request(url.toString(), req)
+			req = new Request(url.toString(), req);
 			return app.fetch(req, env, ctx);
 		}
 

@@ -2,18 +2,20 @@ import app from '../hono/hono';
 import loginService from '../service/login-service';
 import result from '../model/result';
 import userContext from '../security/user-context';
-import turnstileService from '../service/turnstile-service';
+import captchaProviderService from '../service/captcha-provider-service';
+import BizError from '../error/biz-error';
+import appTokenService from '../service/app-token-service';
 import settingService from '../service/setting-service';
 import { t } from '../i18n/i18n';
 
 app.post('/login', async (c) => {
 	const params = await c.req.json();
-	const settingRow = await settingService.query(c);
-	if (settingRow.siteKey) {
+	// 人机验证：未登录场景按「全局强制 → 访客 IP 归属」选择 provider（中国大陆 → hCaptcha）
+	if (await captchaProviderService.needVerify(c)) {
 		if (!params.token) {
 			return c.json(result.fail(t('emptyBotToken'), 400));
 		}
-		await turnstileService.verify(c, params.token);
+		await captchaProviderService.verify(c, params.token, { action: 'login' });
 	}
 	const token = await loginService.login(c, params);
 	return c.json(result.ok({ token: token }));
@@ -32,6 +34,28 @@ app.post('/login/api', async (c) => {
 	}
 
 	const token = await loginService.login(c, params);
+	return c.json(result.ok({ token: token }));
+});
+
+// 设备令牌登录：供安卓客户端使用
+// 说明：路径以 /login 开头，会被 security.js 的 exclude 白名单前缀匹配放行，
+//       因此这里必须自行完成设备令牌校验，不能依赖外层鉴权。
+app.post('/login/app', async (c) => {
+
+	const params = await c.req.json();
+	const { email, deviceToken } = params;
+
+	if (!email || !deviceToken) {
+		throw new BizError('邮箱与设备令牌不能为空');
+	}
+
+	// 1) 校验设备令牌（内部含失败限流），返回 userId 与规范化邮箱
+	const { email: userEmail } = await appTokenService.verifyAndGetUserId(c, params);
+
+	// 2) 复用标准登录流程签发 JWT（noVerifyPwd = true，密码校验已由设备令牌替代）
+	//    这一步会同时写入 KV 会话记录，因此多端登录 / 踢下线机制完全一致
+	const token = await loginService.login(c, { email: userEmail }, true);
+
 	return c.json(result.ok({ token: token }));
 });
 

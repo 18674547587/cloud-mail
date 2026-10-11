@@ -222,6 +222,12 @@ const en = {
     addOsDomain: 'Add Domain',
     domainDesc: 'Domain',
     addTurnstileSecret: 'Add turnstile secret',
+    addHcaptchaSecret: 'Add hCaptcha secret',
+    captchaProviderSetting: 'Provider',
+    captchaProviderAuto: 'Auto (hCaptcha for mainland China)',
+    captchaProviderFollowDefault: 'Follow default',
+    captchaProviderTurnstile: 'Turnstile',
+    captchaProviderHcaptcha: 'hCaptcha',
     backgroundTitle: 'Change Background',
     tgBotDesc: 'Forward received emails to a Telegram bot',
     tgBotToken: 'Bot token',
@@ -410,7 +416,24 @@ const en = {
     authBodyHash: 'Body hash',
     authHeaders: 'Signed headers',
     authSegments: 'SPF details',
-    authReceived: 'Received chain'
+    authReceived: 'Received chain',
+
+    // ===== Device token management =====
+    deviceManage: 'Device Management',
+    deviceManageTip: 'Device tokens are used for signing in from the Android client (no CAPTCHA required) and can be revoked individually at any time. For security, the plaintext token is shown only once when created.',
+    createDeviceToken: 'Create device token',
+    deviceName: 'Device name',
+    deviceNamePlaceholder: 'e.g. My Xiaomi phone',
+    createTime: 'Created',
+    lastUsedTime: 'Last used',
+    neverUsed: 'Never used',
+    deviceEmpty: 'No authorized devices yet',
+    operate: 'Actions',
+    revoke: 'Revoke',
+    revokeConfirm: 'Revoke this device token? The device will be signed out immediately.',
+    revokeSuccessMsg: 'Revoked',
+    tokenCreatedTitle: 'Token created',
+    tokenOnceTip: 'Copy and store it now — this token cannot be viewed again after you close this dialog.'
 }
 
 export default en

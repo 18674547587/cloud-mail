@@ -1,73 +1,17 @@
-import BizError from '../error/biz-error';
-import settingService from './setting-service';
-import { t } from '../i18n/i18n'
+import captchaService from './captcha-service';
+import { captchaConst } from '../const/entity-const';
 
+/**
+ * 兼容层：历史上各处直接调用 turnstileService.verify(c, token)。
+ * 现已统一到 captchaService，本对象固定使用 Turnstile。
+ * 新代码请使用 captchaProviderService.verify(c, token, { userId, action })（自动按规则选择 provider）。
+ */
 const turnstileService = {
-
-	async verify(c, token, options = {}) {
-
-		if (!token) {
-			throw new BizError(t('emptyBotToken'), 400);
-		}
-
-		const settingRow = await settingService.query(c);
-
-		if (!settingRow.secretKey) {
-			console.warn('[Turnstile] secretKey 未配置，跳过验证');
-			return;
-		}
-
-		const remoteIp = c.req.header('cf-connecting-ip') ||
-		                 c.req.header('x-forwarded-for') ||
-		                 '';
-
-		const startTime = Date.now();
-
-		const res = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
-			method: 'POST',
-			headers: {
-				'Content-Type': 'application/x-www-form-urlencoded'
-			},
-			body: new URLSearchParams({
-				secret: settingRow.secretKey,
-				response: token,
-				remoteip: remoteIp
-			})
+	verify(c, token, options = {}) {
+		return captchaService.verify(c, token, {
+			...options,
+			provider: captchaConst.provider.TURNSTILE
 		});
-
-		const result = await res.json();
-		const elapsed = Date.now() - startTime;
-
-		if (!result.success) {
-			const errorCodes = result['error-codes'] || [];
-			const action = options.action || 'unknown';
-
-			console.warn(
-				`[Turnstile] 验证失败 | 操作: ${action} | ` +
-				`耗时: ${elapsed}ms | ` +
-				`错误码: ${errorCodes.join(', ') || '无'}`
-			);
-
-			if (errorCodes.includes('timeout-or-duplicate')) {
-				throw new BizError(t('botVerifyFail'), 400);
-			} else if (errorCodes.includes('invalid-input-secret')) {
-				console.error('[Turnstile] secretKey 配置错误，请在系统设置中检查');
-				throw new BizError(t('botVerifyFail'), 400);
-			} else if (errorCodes.includes('invalid-input-response')) {
-				throw new BizError(t('emptyBotToken'), 400);
-			} else if (errorCodes.includes('internal-error')) {
-				throw new BizError(t('botVerifyFail'), 400);
-			}
-
-			throw new BizError(t('botVerifyFail'), 400);
-		}
-
-		if (result.hostname) {
-			console.log(
-				`[Turnstile] 验证成功 | 操作: ${options.action || 'unknown'} | ` +
-				`耗时: ${elapsed}ms | hostname: ${result.hostname}`
-			);
-		}
 	}
 };
 

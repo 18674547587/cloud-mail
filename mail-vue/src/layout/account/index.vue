@@ -107,9 +107,6 @@
       <div
           class="add-email-turnstile"
           :class="verifyShow ? 'turnstile-show' : 'turnstile-hide'"
-          :data-sitekey="settingStore.settings.siteKey"
-          data-callback="onTurnstileSuccess"
-          data-error-callback="onTurnstileError"
       >
         <span style="font-size: 12px;color: #F56C6C" v-if="botJsError">{{ $t('verifyModuleFailed') }}</span>
       </div>
@@ -142,6 +139,9 @@ import {useSettingStore} from "@/store/setting.js";
 import {useAccountStore} from "@/store/account.js";
 import {useEmailStore} from "@/store/email.js";
 import {useUserStore} from "@/store/user.js";
+import {useUiStore} from "@/store/ui.js";
+import {CAPTCHA_PROVIDER, renderCaptcha, resetCaptcha} from "@/utils/captcha.js";
+import {captchaConfig} from "@/request/my.js";
 import {hasPerm} from "@/perm/perm.js"
 import {useI18n} from "vue-i18n";
 import {AccountAllReceiveEnum} from "@/enums/account-enum.js";
@@ -195,26 +195,93 @@ const openSelect = () => {
   mySelect.value.toggleMenu()
 }
 
-window.onTurnstileError = (e) => {
-  if (verifyErrorCount >= 4) {
-    return
+// ======== 人机验证（Turnstile / hCaptcha，由服务端下发 provider） ========
+
+const uiStore = useUiStore()
+const captchaConf = ref({provider: CAPTCHA_PROVIDER.TURNSTILE, siteKey: ''})
+const captchaRendered = ref(false)
+
+async function ensureCaptchaConfig() {
+  if (captchaConf.value.siteKey) return captchaConf.value
+  try {
+    const data = await captchaConfig()
+    captchaConf.value = {
+      provider: data.provider || CAPTCHA_PROVIDER.TURNSTILE,
+      siteKey: data.siteKey || ''
+    }
+  } catch (e) {
+    console.warn('获取人机验证配置失败', e)
   }
-  verifyErrorCount++
-  console.warn('人机验加载失败', e)
-  setTimeout(() => {
-    nextTick(() => {
-      if (!turnstileId) {
-        turnstileId = window.turnstile.render('.add-email-turnstile')
-      } else {
-        window.turnstile.reset(turnstileId);
+  return captchaConf.value
+}
+
+/**
+ * 先让容器可见并等它拿到尺寸，再返回元素。
+ * 关键：必须在可见容器里渲染 —— hCaptcha/Turnstile 在 display:none 或脱离文档流的容器中
+ * 会按 0 宽渲染，之后即便容器显示也看不到任何东西。
+ */
+async function ensureCaptchaContainer() {
+  verifyShow.value = true
+  await nextTick()
+  for (let i = 0; i < 12; i++) {
+    const el = document.querySelector('.add-email-turnstile')
+    if (el && el.offsetWidth > 0) return el
+    await new Promise(resolve => setTimeout(resolve, 120))
+  }
+  return document.querySelector('.add-email-turnstile')
+}
+
+/** 渲染添加邮箱的验证组件；返回 widget id（未启用验证时返回 null） */
+async function renderAddCaptcha() {
+  const el = await ensureCaptchaContainer()
+  if (!el) {
+    botJsError.value = true
+    throw new Error('人机验证容器不存在')
+  }
+
+  await ensureCaptchaConfig()
+  if (!captchaConf.value.siteKey) return null
+
+  try {
+    const id = await renderCaptcha(captchaConf.value.provider, el, {
+      siteKey: captchaConf.value.siteKey,
+      theme: uiStore.dark ? 'dark' : 'light',
+      onSuccess: (token) => {
+        verifyToken = token
+      },
+      onError: (e) => {
+        console.warn('人机验证失败', e)
+        if (verifyErrorCount >= 4) {
+          botJsError.value = true
+          return
+        }
+        verifyErrorCount++
+        setTimeout(() => resetAddCaptcha(), 1500)
+      },
+      onExpired: () => {
+        verifyToken = ''
       }
     })
-  }, 1500)
-};
+    turnstileId = id
+    captchaRendered.value = true
+    return id
+  } catch (e) {
+    console.error('人机验证渲染失败', e)
+    botJsError.value = true
+    throw e
+  }
+}
 
-window.onTurnstileSuccess = (token) => {
-  verifyToken = token;
-};
+function resetAddCaptcha() {
+  const el = document.querySelector('.add-email-turnstile')
+  const hasWidget = !!(el && el.querySelector('iframe'))
+  if (turnstileId !== null && turnstileId !== undefined && hasWidget) {
+    resetCaptcha(captchaConf.value.provider, turnstileId)
+  } else {
+    // 组件没渲染出来（或已被移除）→ 重新渲染
+    renderAddCaptcha().catch(() => {})
+  }
+}
 
 function getSkeletonRows() {
   if (accounts.length > 20) return skeletonRows = 20
@@ -449,20 +516,11 @@ function submit() {
   }
 
   if (!verifyToken && (settingStore.settings.addEmailVerify === 0 || (settingStore.settings.addEmailVerify === 2 && settingStore.settings.addVerifyOpen))) {
-    if (!verifyShow.value) {
-      verifyShow.value = true
-      nextTick(() => {
-        if (!turnstileId) {
-          try {
-            turnstileId = window.turnstile.render('.add-email-turnstile')
-          } catch (e) {
-            botJsError.value = true
-            console.log('人机验证js加载失败')
-          }
-        } else {
-          window.turnstile.reset('.add-email-turnstile')
-        }
-      })
+    if (!captchaRendered.value) {
+      renderAddCaptcha().then(id => {
+        // 未配置验证组件（返回 null）→ 直接提交；渲染失败会走 catch 并提示
+        if (!id) doAdd()
+      }).catch(() => {})
     } else if (!botJsError.value) {
       ElMessage({
         message: t('botVerifyMsg'),
@@ -473,6 +531,10 @@ function submit() {
     return;
   }
 
+  doAdd()
+}
+
+function doAdd() {
   addLoading.value = true
   accountAdd(addForm.email + addForm.suffix, verifyToken).then(account => {
     addLoading.value = false
@@ -491,14 +553,7 @@ function submit() {
   }).catch(res => {
     if (res.code === 400) {
       verifyToken = ''
-      if (turnstileId) {
-        window.turnstile.reset(turnstileId)
-      } else {
-        nextTick(() => {
-          turnstileId = window.turnstile.render('.add-email-turnstile')
-        })
-      }
-      verifyShow.value = true
+      resetAddCaptcha()
     }
     addLoading.value = false
   })
@@ -658,14 +713,13 @@ path[fill="#ffdda1"] {
   margin-top: 15px;
 }
 
+/* 显示/隐藏必须用 display 切换：在不可见容器里渲染会让 hCaptcha 按 0 宽渲染，之后无法恢复 */
 .turnstile-show {
-  opacity: 1;
+  display: block;
 }
 
 .turnstile-hide {
-  opacity: 0;
-  pointer-events: none;
-  position: fixed;
+  display: none;
 }
 
 </style>

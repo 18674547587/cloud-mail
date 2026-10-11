@@ -169,6 +169,7 @@ import {loginUserInfo} from "@/request/my.js";
 import {permsToRouter} from "@/perm/perm.js";
 import {useI18n} from "vue-i18n";
 import {oauthBindUser, oauthLinuxDoLogin} from "@/request/ouath.js";
+import {CAPTCHA_PROVIDER, siteKeyOf, renderCaptcha, resetCaptcha, removeCaptcha} from "@/utils/captcha.js";
 
 const {t} = useI18n();
 const accountStore = useAccountStore();
@@ -230,54 +231,44 @@ function getTurnstileTheme() {
   return uiStore.dark ? 'dark' : 'light'
 }
 
-function renderTurnstile(containerRef, { onSuccess, onError }) {
+// 当前应使用的人机验证 provider / site key（由服务端下发：全局强制 → 访客 IP 归属）
+const captchaProvider = computed(() => settingStore.settings.captchaProvider || CAPTCHA_PROVIDER.TURNSTILE)
+const captchaSiteKey = computed(() => siteKeyOf(settingStore.settings, captchaProvider.value))
+
+function renderTurnstile(containerRef, { onSuccess, onError, onRendered }) {
   nextTick(() => {
     if (!containerRef.value) {
-      console.warn('Turnstile 容器未找到')
+      console.warn('人机验证容器未找到')
       return
     }
     const el = containerRef.value
     if (el.offsetParent === null) {
-      console.warn('Turnstile 容器不可见，延迟渲染')
-      setTimeout(() => renderTurnstile(containerRef, { onSuccess, onError }), 300)
+      console.warn('人机验证容器不可见，延迟渲染')
+      setTimeout(() => renderTurnstile(containerRef, { onSuccess, onError, onRendered }), 300)
       return
     }
-    try {
-      if (typeof window.turnstile === 'undefined') {
-        console.error('Turnstile JS 未加载')
-        onError('JS 未加载')
-        return
-      }
-      const theme = getTurnstileTheme()
-      const lang = settingStore.lang || 'zh-CN'
-      const id = window.turnstile.render(el, {
-        sitekey: settingStore.settings.siteKey,
-        callback: (token) => { onSuccess(token) },
-        'error-callback': () => { onError('验证失败') },
-        'expired-callback': () => { onSuccess('') },
-        theme: theme,
-        language: lang,
-        'refresh-expired': 'manual',
-      })
-      return id
-    } catch (e) {
-      console.error('Turnstile 渲染失败:', e)
+    renderCaptcha(captchaProvider.value, el, {
+      siteKey: captchaSiteKey.value,
+      theme: getTurnstileTheme(),
+      language: settingStore.lang || 'zh-CN',
+      onSuccess: (token) => { onSuccess(token) },
+      onError: (e) => { onError(e || '验证失败') },
+      onExpired: () => { onSuccess('') }
+    }).then(id => {
+      if (onRendered) onRendered(id)
+    }).catch(e => {
+      console.error('人机验证渲染失败:', e)
       onError(e.message || '渲染失败')
-      return null
-    }
+    })
   })
 }
 
 function resetTurnstile(id) {
-  if (id && window.turnstile) {
-    try { window.turnstile.reset(id) } catch (e) { console.warn('Turnstile 重置失败:', e) }
-  }
+  resetCaptcha(captchaProvider.value, id)
 }
 
 function removeTurnstile(id) {
-  if (id && window.turnstile) {
-    try { window.turnstile.remove(id) } catch (e) { console.warn('Turnstile 移除失败:', e) }
-  }
+  removeCaptcha(captchaProvider.value, id)
 }
 
 // ======== 登录 Turnstile ========
@@ -288,6 +279,7 @@ function showLoginTurnstile(loginEmail) {
   loginVerifying.value = true
   loginBotJsError.value = false
   renderTurnstile(loginTurnstileRef, {
+    onRendered: (id) => { loginTurnstileId = id },
     onSuccess: (token) => {
       loginVerifyToken = token
       loginVerifying.value = false
@@ -317,6 +309,7 @@ function showRegisterTurnstile() {
   registerVerifying.value = true
   botJsError.value = false
   renderTurnstile(registerTurnstileRef, {
+    onRendered: (id) => { turnstileId = id },
     onSuccess: (token) => {
       verifyToken = token
       registerVerifying.value = false
@@ -355,7 +348,7 @@ const submit = () => {
     ElMessage({ message: t('emptyPwdMsg'), type: 'error', plain: true })
     return
   }
-  if (settingStore.settings.siteKey) {
+  if (captchaSiteKey.value) {
     if (loginVerifyToken) {
       doLogin(fullEmail)
     } else if (!loginVerifyShow.value) {
@@ -426,7 +419,7 @@ function submitRegister() {
       return
     }
   }
-  const needVerify = settingStore.settings.siteKey && (
+  const needVerify = captchaSiteKey.value && (
     settingStore.settings.registerVerify === 0 ||
     (settingStore.settings.registerVerify === 2 && settingStore.settings.regVerifyOpen)
   )

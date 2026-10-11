@@ -68,6 +68,21 @@ export const attConst = {
 	}
 }
 
+/**
+ * 人机验证 provider
+ * AUTO：跟随规则（全局未强制时按访客 IP 判定：中国大陆 → hCaptcha，其余 → Turnstile）
+ */
+export const captchaConst = {
+	provider: {
+		AUTO: 0,
+		TURNSTILE: 1,
+		HCAPTCHA: 2
+	},
+	country: {
+		CN: 'CN'
+	}
+}
+
 export const settingConst = {
 	register: {
 		OPEN: 0,

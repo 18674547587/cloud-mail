@@ -326,6 +326,40 @@
                   </el-button>
                 </div>
               </div>
+              <div class="setting-item">
+                <div><span>{{ $t('captchaProviderSetting') }}</span></div>
+                <div>
+                  <el-select
+                      @change="change"
+                      :style="`width: ${ locale === 'en' ? 190 : 170 }px;`"
+                      v-model="setting.captchaProvider"
+                      placeholder="Select"
+                      class="bot-verify-select"
+                  >
+                    <el-option :value="0" :label="$t('captchaProviderAuto')"/>
+                    <el-option :value="1" label="Turnstile"/>
+                    <el-option :value="2" label="hCaptcha"/>
+                  </el-select>
+                </div>
+              </div>
+              <div class="setting-item">
+                <div><span>hCaptcha Site Key</span></div>
+                <div class="bot-verify">
+                  <span>{{ setting.hcaptchaSiteKey }}</span>
+                  <el-button class="opt-button" size="small" type="primary" @click="hcaptchaShow = true">
+                    <Icon icon="lsicon:edit-outline" width="16" height="16"/>
+                  </el-button>
+                </div>
+              </div>
+              <div class="setting-item">
+                <div><span>hCaptcha Secret Key</span></div>
+                <div class="bot-verify">
+                  <span>{{ setting.hcaptchaSecretKey }}</span>
+                  <el-button class="opt-button" size="small" type="primary" @click="hcaptchaShow = true">
+                    <Icon icon="lsicon:edit-outline" width="16" height="16"/>
+                  </el-button>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -440,6 +474,14 @@
           <el-input type="text" placeholder="Site Key" v-model="turnstileForm.siteKey"/>
           <el-input type="text" style="margin-top: 15px" placeholder="Secret Key" v-model="turnstileForm.secretKey"/>
           <el-button type="primary" :loading="settingLoading" @click="saveTurnstileKey">{{ $t('save') }}</el-button>
+        </form>
+      </el-dialog>
+      <el-dialog v-model="hcaptchaShow" :title="$t('addHcaptchaSecret')" width="340"
+                 @closed="hcaptchaForm.secretKey = '';hcaptchaForm.siteKey = ''">
+        <form>
+          <el-input type="text" placeholder="Site Key" v-model="hcaptchaForm.siteKey"/>
+          <el-input type="text" style="margin-top: 15px" placeholder="Secret Key" v-model="hcaptchaForm.secretKey"/>
+          <el-button type="primary" :loading="settingLoading" @click="saveHcaptchaKey">{{ $t('save') }}</el-button>
         </form>
       </el-dialog>
       <el-dialog
@@ -767,6 +809,7 @@ const editTitleShow = ref(false)
 const resendTokenFormShow = ref(false)
 const r2DomainShow = ref(false)
 const turnstileShow = ref(false)
+const hcaptchaShow = ref(false)
 const tgSettingShow = ref(false)
 const noticePopupShow = ref(false)
 const thirdEmailShow = ref(false)
@@ -797,6 +840,10 @@ const resendTokenForm = reactive({
   token: '',
 })
 const turnstileForm = reactive({
+  siteKey: '',
+  secretKey: ''
+})
+const hcaptchaForm = reactive({
   siteKey: '',
   secretKey: ''
 })
@@ -1185,6 +1232,13 @@ function saveTurnstileKey() {
   editSetting(settingForm)
 }
 
+function saveHcaptchaKey() {
+  const settingForm = {}
+  settingForm.hcaptchaSiteKey = hcaptchaForm.siteKey
+  settingForm.hcaptchaSecretKey = hcaptchaForm.secretKey
+  editSetting(settingForm)
+}
+
 async function saveBackground() {
 
   let image = ''
@@ -1259,6 +1313,8 @@ function backupSetting() {
   delete settingForm.resendTokens
   delete settingForm.siteKey
   delete settingForm.secretKey
+  delete settingForm.hcaptchaSiteKey
+  delete settingForm.hcaptchaSecretKey
   backup = JSON.stringify(setting.value)
 }
 
@@ -1276,6 +1332,8 @@ function change(e) {
   const settingForm = {...setting.value}
   delete settingForm.siteKey
   delete settingForm.secretKey
+  delete settingForm.hcaptchaSiteKey
+  delete settingForm.hcaptchaSecretKey
   delete settingForm.s3AccessKey
   delete settingForm.s3SecretKey
   delete settingForm.resendTokens
@@ -1314,6 +1372,7 @@ function editSetting(settingForm, refreshStatus = true) {
     r2DomainShow.value = false
     resendTokenFormShow.value = false
     turnstileShow.value = false
+    hcaptchaShow.value = false
     tgSettingShow.value = false
     thirdEmailShow.value = false
     forwardRulesShow.value = false

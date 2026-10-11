@@ -1,6 +1,5 @@
 import emailService from './email-service';
 import { emailConst } from '../const/entity-const';
-import BizError from '../error/biz-error';
 
 /**
  * 邮件状态优先级（数值越大越"终态"）
@@ -123,15 +122,25 @@ const resendService = {
 
 	async webhooks(c, body) {
 
-		// 事件类型缺失或 payload 结构异常时直接拒绝，避免后续取值抛异常
+		// 说明：Resend 的 webhook 是「账号级」的，会把该账号下所有邮件的事件都推过来。
+		// 本项目横跨两个 Resend 账号，其中账号A 还承载了其它应用（如工作区脚本用
+		// ai@95270.cc.cd / ai.hw@1206201.xyz 发信）的邮件，这些邮件在 Cloud Mail 的
+		// D1 里没有记录。它们不是错误，只是「不属于本系统」。
+		// 关键：Svix 只在收到 2xx 时才算投递成功，其余状态码一律重试，
+		// 长期失败会导致 Resend 自动禁用整个 webhook（2026-10-03 实际发生过）。
+		// 因此下面这些「无法处理但合理」的情况一律忽略并返回 2xx，仅打日志。
+
+		// 事件类型缺失或 payload 结构异常：忽略
 		if (!body || typeof body.type !== 'string') {
-			throw new BizError('webhook 事件格式非法');
+			console.warn('webhook 事件格式非法，已忽略:', JSON.stringify(body)?.slice(0, 200));
+			return;
 		}
 
 		const resendEmailId = body?.data?.email_id;
 
 		if (!resendEmailId) {
-			throw new BizError('webhook 缺少 email_id');
+			console.warn('webhook 缺少 email_id，已忽略，type =', body.type);
+			return;
 		}
 
 		const params = {
@@ -169,7 +178,10 @@ const resendService = {
 		const emailRow = await emailService.updateEmailStatus(c, params)
 
 		if (!emailRow) {
-			throw new BizError('更新邮件状态记录失败');
+			// 该邮件不属于本系统（例如同账号下其它应用发出的邮件），属正常情况：
+			// 忽略并返回 2xx，避免 Svix 无限重试最终导致 webhook 被禁用。
+			console.warn('未匹配到邮件记录，已忽略:', resendEmailId, body.type);
+			return;
 		}
 
 	}
