@@ -89,6 +89,7 @@
                 <template #dropdown>
                   <el-dropdown-menu>
                     <el-dropdown-item @click="openSetPwd(props.row)" >{{ $t('chgPwd') }}</el-dropdown-item>
+                    <el-dropdown-item v-if="hasPerm('user:set-status')" @click="openSetAvatar(props.row)" >{{ $t('setAvatar') }}</el-dropdown-item>
                     <el-dropdown-item @click="openSetType(props.row)" >{{ $t('perm') }}</el-dropdown-item>
                     <template v-if="props.row.type !== 0">
                       <el-dropdown-item v-if="props.row.isDel !== 1" @click="setStatus(props.row)">
@@ -225,10 +226,14 @@
         />
       </div>
     </el-dialog>
+    <el-dialog v-model="avatarShow" :title="t('setAvatar')" width="min(440px, calc(100vw - 40px))">
+      <avatar-picker mode="admin" :user-id="avatarUser.userId" :model-value="avatarUser.avatarUrl"
+                     :fallback-text="formatName(avatarUser.email)" @success="onAvatarSuccess"/>
+    </el-dialog>
     <el-dialog class="account-dialog" v-model="detailsShow" :title="t('userDetails')"  >
       <div class="details">
         <div v-if="userDetails.username"><span class="details-item-title">LinuxDo:</span>
-          <el-avatar :src="userDetails.avatar" :size="30" class="linuxdo-avatar"  />
+          <el-avatar :src="userDetails.oauthAvatar" :size="30" class="linuxdo-avatar"  />
           <span style="margin: 0 10px">用户名：{{userDetails.username}}</span>
           <span>
                     等级：<el-tag type="success">{{userDetails.trustLevel}}</el-tag>
@@ -387,6 +392,9 @@ import {isEmail} from "@/utils/verify-utils.js";
 import {useRoleStore} from "@/store/role.js";
 import {useUserStore} from "@/store/user.js";
 import {useI18n} from 'vue-i18n';
+import avatarPicker from '@/components/avatar-picker/index.vue'
+import {hasPerm} from "@/perm/perm.js";
+import {formatName} from "@/utils/text.js";
 
 defineOptions({
   name: 'user'
@@ -588,6 +596,33 @@ function openAccountList(userId) {
 function openDetails(user) {
   userDetails.value = user;
   detailsShow.value = true;
+}
+
+// ===================== 头像（管理员代设） =====================
+
+const avatarShow = ref(false)
+const avatarUser = ref({})
+
+// 对象 key → 可直接引用的地址（发布环境为相对路径，开发环境自动带后端域名）
+function avatarUrlOf(key) {
+  if (!key) {
+    return ''
+  }
+  const base = (import.meta.env.VITE_BASE_URL || '').replace(/\/api\/?$/, '')
+  return `${base}/${key}`
+}
+
+function openSetAvatar(user) {
+  avatarUser.value = {
+    userId: user.userId,
+    email: user.email,
+    avatarUrl: avatarUrlOf(user.avatar)
+  }
+  avatarShow.value = true
+}
+
+function onAvatarSuccess() {
+  getUserList(false)
 }
 
 function getAccountList(loading = false) {

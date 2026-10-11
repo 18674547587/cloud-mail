@@ -1,5 +1,6 @@
 import app from '../hono/hono';
 import userService from '../service/user-service';
+import avatarService from '../service/avatar-service';
 import result from '../model/result';
 import userContext from '../security/user-context';
 import captchaProviderService from '../service/captcha-provider-service';
@@ -24,6 +25,28 @@ app.delete('/my/delete', async (c) => {
 	await userService.delete(c, userContext.getUserId(c));
 	return c.json(result.ok());
 });
+
+// ===================== 头像（用户级，本人操作） =====================
+
+// 申请头像直传凭证：返回 { key, uploadUrl, headers }，前端拿到后直接 PUT 到对象存储
+app.post('/my/avatar/presign', async (c) => {
+	const data = await avatarService.presign(c, await c.req.json(), userContext.getUserId(c));
+	return c.json(result.ok(data));
+});
+
+// 上传完成后确认保存（key 归属当前登录用户）
+app.put('/my/avatar', async (c) => {
+	const userId = userContext.getUserId(c);
+	const data = await avatarService.save(c, await c.req.json(), userId, userId);
+	return c.json(result.ok(data));
+});
+
+// 清除头像，恢复默认文字头像
+app.delete('/my/avatar', async (c) => {
+	const data = await avatarService.remove(c, userContext.getUserId(c));
+	return c.json(result.ok(data));
+});
+
 
 // 当前用户的人机验证渲染配置（provider 由服务端决策，前端不自行判断）
 app.get('/my/captchaConfig', async (c) => {

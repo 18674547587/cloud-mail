@@ -4,6 +4,7 @@ const KvConst = {
 	SEND_DAY_COUNT: 'send_day_count:',
 	PUBLIC_KEY: "public_key:",
 	ATT_UPLOAD: 'att-upload:',
+	AVATAR_UPLOAD: 'avatar-upload:',
 	ATT_SCAN_CURSOR: 'att-scan-cursor',
 	APP_TOKEN: 'app-token:',
 	APP_TOKEN_UID: 'app-token-uid:',

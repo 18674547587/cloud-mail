@@ -21,3 +21,20 @@ export function captchaConfig() {
 export function saveCaptchaProvider(captchaProvider) {
     return http.put('/my/captchaProvider', {captchaProvider})
 }
+
+// ===================== 头像 =====================
+
+// 申请头像直传凭证，返回 { key, uploadUrl, headers }
+export function avatarPresign(data) {
+    return http.post('/my/avatar/presign', data)
+}
+
+// 上传完成后确认保存
+export function saveAvatar(key) {
+    return http.put('/my/avatar', {key})
+}
+
+// 移除头像
+export function removeAvatar() {
+    return http.delete('/my/avatar')
+}

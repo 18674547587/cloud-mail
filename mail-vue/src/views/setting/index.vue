@@ -3,6 +3,16 @@
     <div class="container">
       <div class="title">{{$t('profile')}}</div>
       <div class="item">
+        <div>{{$t('avatar')}}</div>
+        <div class="avatar-item">
+          <div class="avatar-thumb">
+            <img v-if="userStore.user.avatarUrl" :src="userStore.user.avatarUrl" alt="avatar"/>
+            <span v-else>{{ formatName(userStore.user.email) }}</span>
+          </div>
+          <el-button type="primary" @click="avatarShow = true">{{$t('changeAvatar')}}</el-button>
+        </div>
+      </div>
+      <div class="item">
         <div>{{$t('username')}}</div>
         <div>
           <span v-if="setNameShow" class="edit-name-input">
@@ -106,6 +116,12 @@
         <el-button type="primary" @click="copyToken">{{$t('copy')}}</el-button>
       </div>
     </el-dialog>
+    <el-dialog v-model="avatarShow" :title="$t('setAvatar')" width="min(440px, calc(100vw - 40px))">
+      <avatar-picker
+          :model-value="userStore.user.avatarUrl"
+          :fallback-text="formatName(userStore.user.email)"
+          @success="onAvatarSuccess"/>
+    </el-dialog>
     <el-dialog v-model="pwdShow" :title="$t('changePassword')" width="340">
       <div class="update-pwd">
         <el-input type="password" :placeholder="$t('newPassword')" v-model="form.password" autocomplete="off"/>
@@ -126,6 +142,8 @@ import {accountSetName} from "@/request/account.js";
 import {useAccountStore} from "@/store/account.js";
 import {useI18n} from "vue-i18n";
 import dayjs from 'dayjs';
+import avatarPicker from '@/components/avatar-picker/index.vue'
+import {formatName} from '@/utils/text.js';
 
 const { t } = useI18n()
 const accountStore = useAccountStore()
@@ -133,6 +151,15 @@ const userStore = useUserStore();
 const setPwdLoading = ref(false)
 const setNameShow = ref(false)
 const accountName = ref(null)
+
+// ===================== 头像 =====================
+
+const avatarShow = ref(false)
+
+function onAvatarSuccess() {
+  // 重新拉取用户信息，让右上角头像与个人资料页保持一致
+  userStore.refreshUserInfo()
+}
 
 // ===================== 人机验证偏好 =====================
 
@@ -382,6 +409,33 @@ onMounted(() => {
           overflow: hidden;
           white-space: nowrap;
           text-overflow: ellipsis;
+        }
+      }
+
+      .avatar-item {
+        display: flex;
+        align-items: center;
+        gap: 15px;
+
+        .avatar-thumb {
+          flex: none;
+          width: 40px;
+          height: 40px;
+          border-radius: 10px;
+          overflow: hidden;
+          border: 1px solid var(--dark-border, var(--el-border-color));
+          background: var(--el-bg-color);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 18px;
+
+          img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+          }
         }
       }
 

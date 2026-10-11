@@ -41,3 +41,15 @@ export function userAllAccount(userId, num, size) {
 export function userDeleteAccount(accountId) {
     return http.delete('/user/deleteAccount', {params:{accountId}})
 }
+
+// ===================== 头像（管理员代设） =====================
+
+// 把已上传的头像挂到指定用户身上
+export function userSetAvatar(params) {
+    return http.put('/user/avatar', params)
+}
+
+// 清除指定用户的头像
+export function userRemoveAvatar(userId) {
+    return http.delete('/user/avatar', {params: {userId}})
+}

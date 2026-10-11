@@ -433,6 +433,20 @@ const zh = {
     revokeConfirm: '确定吊销该设备令牌？吊销后该设备将立即无法登录。',
     revokeSuccessMsg: '已吊销',
     tokenCreatedTitle: '令牌创建成功',
-    tokenOnceTip: '请立即复制并妥善保存，关闭后无法再次查看此令牌。'
+    tokenOnceTip: '请立即复制并妥善保存，关闭后无法再次查看此令牌。',
+    // ===== 头像 =====
+    avatar: '头像',
+    setAvatar: '设置头像',
+    changeAvatar: '更换头像',
+    removeAvatar: '移除头像',
+    avatarFormatTip: '支持 PNG / JPG / WEBP / GIF 格式',
+    avatarSizeTip: '建议 1MB 以内，最大 20MB',
+    avatarFormatInvalid: '仅支持 PNG / JPG / WEBP / GIF 格式',
+    avatarTooLarge: '图片过大，最大支持 20MB',
+    avatarLargeTip: '图片较大，加载可能较慢',
+    avatarUploadFail: '头像上传失败，请重试',
+    avatarSaveSuccess: '头像已更新',
+    avatarRemoveSuccess: '头像已移除',
+    avatarRemoveConfirm: '确定要移除当前头像吗？'
 }
 export default zh

@@ -3,6 +3,7 @@ import userService from '../service/user-service';
 import result from '../model/result';
 import userContext from '../security/user-context';
 import accountService from '../service/account-service';
+import avatarService from '../service/avatar-service';
 
 app.delete('/user/delete', async (c) => {
 	await userService.physicsDelete(c, c.req.query());
@@ -47,6 +48,19 @@ app.put('/user/restore', async (c) => {
 app.get('/user/allAccount', async (c) => {
 	const data = await accountService.allAccount(c, c.req.query());
 	return c.json(result.ok(data));
+});
+
+// 管理员为用户设置头像（key 必须是该管理员本人上传的，权限复用 user:set-status）
+app.put('/user/avatar', async (c) => {
+	const params = await c.req.json();
+	await avatarService.save(c, params, userContext.getUserId(c), Number(params.userId));
+	return c.json(result.ok());
+});
+
+// 管理员清除用户头像
+app.delete('/user/avatar', async (c) => {
+	await avatarService.remove(c, Number(c.req.query('userId')));
+	return c.json(result.ok());
 });
 
 app.delete('/user/deleteAccount', async (c) => {

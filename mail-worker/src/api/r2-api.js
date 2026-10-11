@@ -7,9 +7,9 @@ app.get('/oss/*', async (c) => {
 	try {
 		key = decodeURIComponent(key);
 	} catch (e) { /* 保留原值 */ }
-	// 安全收窄：该路由为免鉴权公开访问（用于邮件内嵌图片），
-	// 仅允许访问附件前缀，防止读取对象存储中的其他任意对象
-	if (!key || !key.startsWith(constant.ATTACHMENT_PREFIX)) {
+	// 安全收窄：该路由为免鉴权公开访问（用于邮件内嵌图片、用户头像），
+	// 仅允许访问附件与头像前缀，防止读取对象存储中的其他任意对象
+	if (!key || !(key.startsWith(constant.ATTACHMENT_PREFIX) || key.startsWith(constant.AVATAR_PREFIX))) {
 		return c.text('Not Found', 404);
 	}
 	return await r2Service.toObjResp(c, key);

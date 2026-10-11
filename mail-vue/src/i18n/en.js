@@ -433,7 +433,21 @@ const en = {
     revokeConfirm: 'Revoke this device token? The device will be signed out immediately.',
     revokeSuccessMsg: 'Revoked',
     tokenCreatedTitle: 'Token created',
-    tokenOnceTip: 'Copy and store it now — this token cannot be viewed again after you close this dialog.'
+    tokenOnceTip: 'Copy and store it now — this token cannot be viewed again after you close this dialog.',
+    // ===== Avatar =====
+    avatar: 'Avatar',
+    setAvatar: 'Set avatar',
+    changeAvatar: 'Change avatar',
+    removeAvatar: 'Remove avatar',
+    avatarFormatTip: 'PNG / JPG / WEBP / GIF supported',
+    avatarSizeTip: '1MB recommended, 20MB maximum',
+    avatarFormatInvalid: 'Only PNG / JPG / WEBP / GIF are supported',
+    avatarTooLarge: 'Image is too large, 20MB maximum',
+    avatarLargeTip: 'Large image, loading may be slow',
+    avatarUploadFail: 'Avatar upload failed, please retry',
+    avatarSaveSuccess: 'Avatar updated',
+    avatarRemoveSuccess: 'Avatar removed',
+    avatarRemoveConfirm: 'Remove the current avatar?'
 }
 
 export default en

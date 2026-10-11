@@ -7,3 +7,10 @@ export function getTextWidth(text, font = '14px sans-serif') {
     ctx.font = font;
     return ctx.measureText(text).width;
 }
+
+/**
+ * 头像兜底文字：取邮箱首字母
+ */
+export function formatName(email) {
+    return email ? (email[0]?.toUpperCase() || '') : '';
+}

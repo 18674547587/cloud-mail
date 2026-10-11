@@ -19,6 +19,7 @@ import { t } from '../i18n/i18n'
 import reqUtils from '../utils/req-utils';
 import {oauth} from "../entity/oauth";
 import oauthService from "./oauth-service";
+import avatarService from './avatar-service';
 
 const userService = {
 
@@ -45,6 +46,8 @@ const userService = {
 		user.permKeys = permKeys;
 		user.role = roleRow;
 		user.type = userRow.type;
+		user.avatar = userRow.avatar || '';
+		user.avatarUrl = avatarService.toUrl(c, userRow.avatar);
 
 		if (c.env.admin === userRow.email) {
 			user.role = constant.ADMIN_ROLE
@@ -144,7 +147,9 @@ const userService = {
 			...user,
 			username: oauth.username,
 			trustLevel: oauth.trustLevel,
-			avatar: oauth.avatar,
+			// 注意：user.avatar 是用户自己上传的头像（对象 key），
+			// 第三方（LinuxDo）头像另起字段名，避免相互覆盖
+			oauthAvatar: oauth.avatar,
 			name: oauth.name
 		}).from(user).leftJoin(oauth, eq(oauth.userId, user.userId))
 			.where(and(...conditions));

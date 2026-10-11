@@ -18,6 +18,7 @@ const user = sqliteTable('user', {
 	sendCount: text('send_count').default(0),
 	regKeyId: integer('reg_key_id').default(0).notNull(),
 	captchaProvider: integer('captcha_provider').default(0).notNull(),
+	avatar: text('avatar').default('').notNull(),
 	isDel: integer('is_del').default(0).notNull()
 });
 export default user

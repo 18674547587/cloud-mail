@@ -22,14 +22,16 @@
       <el-dropdown ref="userinfoRef" @visible-change="e => userInfoShow = e" :teleported="false" popper-class="detail-dropdown">
         <div class="avatar" @click="userInfoHide" >
           <div class="avatar-text">
-            <div>{{ formatName(userStore.user.email) }}</div>
+            <img v-if="userStore.user.avatarUrl" class="avatar-img" :src="userStore.user.avatarUrl" alt="avatar"/>
+            <div v-else>{{ formatName(userStore.user.email) }}</div>
           </div>
           <Icon class="setting-icon" icon="mingcute:down-small-fill" width="24" height="24"/>
         </div>
         <template #dropdown>
           <div class="user-details">
             <div class="details-avatar">
-              {{ formatName(userStore.user.email) }}
+              <img v-if="userStore.user.avatarUrl" class="avatar-img" :src="userStore.user.avatarUrl" alt="avatar"/>
+              <template v-else>{{ formatName(userStore.user.email) }}</template>
             </div>
             <div class="user-name">
               {{ userStore.user.name }}
@@ -86,6 +88,7 @@ import {hasPerm} from "@/perm/perm.js"
 import {useI18n} from "vue-i18n";
 import {setExtend} from "@/utils/day.js"
 import {copyText} from "@/utils/clipboard-utils.js"
+import {formatName} from "@/utils/text.js"
 
 const {t} = useI18n();
 const route = useRoute();
@@ -251,10 +254,6 @@ function clickLogout() {
   })
 }
 
-function formatName(email) {
-  return email[0]?.toUpperCase() || ''
-}
-
 </script>
 <style>
 .detail-dropdown {
@@ -352,6 +351,14 @@ function formatName(email) {
     align-items: center;
     justify-content: center;
     border-radius: 10px;
+    overflow: hidden;
+  }
+
+  .avatar-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
   }
 }
 
@@ -462,6 +469,14 @@ function formatName(email) {
       align-items: center;
       border-radius: 8px;
       border: 1px solid var(--dark-border);
+      overflow: hidden;
+
+      .avatar-img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+      }
     }
 
     .setting-icon {

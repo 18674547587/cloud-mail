@@ -29,6 +29,7 @@ const dbInit = {
 		await this.v2_8DB(c);
 		await this.v2_9DB(c);
 		await this.v3_0DB(c);
+		await this.v3_1DB(c);
 		await settingService.refresh(c);
 		return c.text('success');
 	},
@@ -639,7 +640,8 @@ const dbInit = {
 			status INTEGER DEFAULT 0 NOT NULL,
 			create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
 			active_time DATETIME,
-			is_del INTEGER DEFAULT 0 NOT NULL
+			is_del INTEGER DEFAULT 0 NOT NULL,
+			avatar TEXT NOT NULL DEFAULT ''
 		  )
 		`).run();
 
@@ -728,6 +730,24 @@ const dbInit = {
 		})
 
 		await c.env.db.batch(queryList);
+	},
+
+	/**
+	 * 用户头像（v3.1）：user 表新增 avatar 列，存对象存储 key（空 = 未设置，前端回退文字头像）
+	 */
+	async v3_1DB(c) {
+
+		try {
+
+			const avatarColumn = await c.env.db.prepare(`SELECT * FROM pragma_table_info('user') WHERE name = 'avatar' limit 1`).first();
+
+			if (!avatarColumn) {
+				await c.env.db.prepare(`ALTER TABLE user ADD COLUMN avatar TEXT NOT NULL DEFAULT ''`).run();
+			}
+
+		} catch (e) {
+			console.warn(`头像字段初始化跳过：${e.message}`);
+		}
 	}
 };
 export { dbInit };

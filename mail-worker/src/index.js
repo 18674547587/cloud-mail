@@ -39,7 +39,7 @@ export default {
 			return app.fetch(req, env, ctx);
 		}
 
-		 if (['/static/','/attachments/'].some(p => url.pathname.startsWith(p))) {
+		 if (['/static/','/attachments/','/avatar/'].some(p => url.pathname.startsWith(p))) {
 			 return await r2Service.toObjResp({ env }, url.pathname.substring(1));
 		 }
 
