@@ -102,6 +102,9 @@ const accountService = {
 		// 否则等该用户下次登录云邮时，由登录流程按 userId 全量补齐。
 		if (params.password) {
 			await imapSyncService.ensureAccount(c, email, params.password);
+		} else {
+			// 无密码也要建号：否则站内发信会在 RCPT 阶段被拒（mailbox-does-not-exist）
+			await imapSyncService.ensureAccountExists(c, email);
 		}
 
 		return accountRow;

@@ -221,6 +221,62 @@ const imapSyncService = {
 	},
 
 	/**
+	 * 仅确保账号存在（不存在则用随机密码创建），**不覆盖已有密码**。
+	 *
+	 * 用于「添加邮箱但调用方没提供密码」的场景：必须先建号，否则站内发信
+	 * 会在 RCPT 阶段被 Stalwart 拒收（smtp.mailbox-does-not-exist）。
+	 * 用户下次登录云邮时，登录流程会用真实密码覆盖随机密码。
+	 */
+	async ensureAccountExists(c, email) {
+
+		try {
+
+			if (!this.enabled(c) || !email) {
+				return false;
+			}
+
+			if (await this.findAccountId(c, email)) {
+				return true;
+			}
+
+			const domainId = await this.ensureDomain(c, email);
+
+			if (!domainId) {
+				return false;
+			}
+
+			const pw = crypto.randomUUID() + crypto.randomUUID();
+
+			const r = await this.call(c, [['x:Account/set', {
+				create: {
+					'n1': {
+						'@type': 'User',
+						name: String(email).split('@')[0],
+						domainId: domainId,
+						credentials: { '0': { '@type': 'Password', secret: pw } },
+						roles: { '@type': 'User' }
+					}
+				}
+			}, 'c']]);
+
+			const created = r?.methodResponses?.[0]?.[1]?.created?.n1;
+
+			if (created) {
+				console.log('[IMAP] 已建号(随机密码):', email, '->', created.id);
+				return true;
+			}
+
+			console.warn('[IMAP] 建号失败:', email,
+				JSON.stringify(r?.methodResponses?.[0]?.[1]?.notCreated || {}));
+			return false;
+
+		} catch (e) {
+			console.error('[IMAP] ensureAccountExists 失败:', email, e);
+			return false;
+		}
+	},
+
+	/**
 	 * 停用 Stalwart 侧账号：清空 credentials（账号与邮件保留，可逆）。
 	 *
 	 * 用于「云邮删除用户 / 删除邮箱 / 封禁用户」后立即切断 IMAP/SMTP 登录。
