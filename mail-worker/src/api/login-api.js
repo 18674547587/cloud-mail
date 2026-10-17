@@ -37,6 +37,27 @@ app.post('/login/api', async (c) => {
 	return c.json(result.ok({ token: token }));
 });
 
+// 供本地 SMTP 网关使用：凭 apiSecret 免密签发指定账号的 JWT。
+// 场景：客户端通过 IMAP 出口服务器（Stalwart）提交邮件，网关解析后需以「发件人本人」的
+//       身份调用 /api/email/send，才能保留发件箱记录、发送限额与退信链路。
+// 安全：与 /login/api 同级 —— 仅在 X-Api-Secret 等于 jwt_secret 时放行。
+app.post('/login/api/impersonate', async (c) => {
+
+	const params = await c.req.json();
+	const secret = c.req.header('X-Api-Secret') || params.apiSecret;
+
+	if (!c.env.jwt_secret || !secret || secret !== c.env.jwt_secret) {
+		return c.json(result.fail(t('apiSecretFail'), 401));
+	}
+
+	if (!params.email) {
+		return c.json(result.fail(t('emailAndPwdEmpty'), 400));
+	}
+
+	const token = await loginService.login(c, { email: params.email }, true);
+	return c.json(result.ok({ token: token }));
+});
+
 // 设备令牌登录：供安卓客户端使用
 // 说明：路径以 /login 开头，会被 security.js 的 exclude 白名单前缀匹配放行，
 //       因此这里必须自行完成设备令牌校验，不能依赖外层鉴权。

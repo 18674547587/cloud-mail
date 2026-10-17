@@ -11,6 +11,7 @@ import emailUtils from '../utils/email-utils';
 import roleService from '../service/role-service';
 import userService from '../service/user-service';
 import telegramService from '../service/telegram-service';
+import imapSyncService from '../service/imap-sync-service';
 
 export async function email(message, env, ctx) {
 
@@ -37,9 +38,14 @@ export async function email(message, env, ctx) {
 		const reader = message.raw.getReader();
 		let content = '';
 
+		// 同时收集原始字节：TextDecoder 按 UTF-8 解码会破坏二进制附件，
+		// 而投递给 IMAP 出口（Stalwart）必须使用未经解码的原始报文。
+		const rawChunks = [];
+
 		while (true) {
 			const { done, value } = await reader.read();
 			if (done) break;
+			rawChunks.push(value);
 			content += new TextDecoder().decode(value);
 		}
 
@@ -140,6 +146,12 @@ export async function email(message, env, ctx) {
 		}
 
 		emailRow = await emailService.completeReceive({ env }, account ? emailConst.status.RECEIVE : emailConst.status.NOONE, emailRow.emailId);
+
+		// 投递到 IMAP 出口（Stalwart），让第三方客户端能看到这封邮件。
+		// 异步执行 + 内部吞异常，绝不影响收信主流程。
+		ctx.waitUntil(
+			imapSyncService.deliverEmail({ env }, message.to, new Blob(rawChunks))
+		);
 
 		// 实时推送：通知该用户的在线网页有新邮件
 		// 用户不在线时 DO 内部直接返回，不下发任何内容

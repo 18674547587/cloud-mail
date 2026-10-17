@@ -18,6 +18,7 @@ import dayjs from 'dayjs';
 import kvConst from '../const/kv-const';
 import { t } from '../i18n/i18n'
 import domainUtils from '../utils/domain-uitls';
+import imapSyncService from './imap-sync-service';
 import account from "../entity/account";
 import { att } from '../entity/att';
 import telegramService from './telegram-service';
@@ -624,9 +625,13 @@ const emailService = {
 		//保存邮件
 		const receiveEmailList = emailDataList.filter(emailRow => emailRow.status === emailConst.status.RECEIVE || emailRow.status === emailConst.status.NOONE);
 
+		const savedRows = [];
+
 		for (const emailData of receiveEmailList) {
 
 			const emailRow = await orm(c).insert(email).values(emailData).returning().get();
+
+			savedRows.push(emailRow);
 
 			//设置附件保存
 			for (const attRow of attList) {
@@ -638,6 +643,27 @@ const emailService = {
 				await orm(c).insert(att).values(attValues).run();
 			}
 
+		}
+
+		// 站内邮件不经过 Cloudflare Email Routing，收信流程里的投递钩子不会触发，
+		// 这里补投一次，否则 IMAP 客户端看不到站内邮件。
+		for (const row of savedRows) {
+			try {
+				c.executionCtx?.waitUntil(
+					imapSyncService.deliverEmail(c, row.toEmail, imapSyncService.buildRawMessage({
+						fromEmail: row.sendEmail,
+						fromName: row.name,
+						toEmail: row.toEmail,
+						toName: row.toName,
+						subject: row.subject,
+						html: row.content,
+						text: row.text,
+						messageId: row.messageId,
+					}))
+				);
+			} catch (e) {
+				console.error('[IMAP] 站内邮件投递失败:', e);
+			}
 		}
 
 		const bouncedEmail = emailDataList.find(emailRow => emailRow.status === emailConst.status.BOUNCED);

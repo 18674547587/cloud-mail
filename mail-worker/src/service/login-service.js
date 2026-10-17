@@ -12,6 +12,7 @@ import verifyUtils from '../utils/verify-utils';
 import accountService from './account-service';
 import settingService from './setting-service';
 import saltHashUtils from '../utils/crypto-utils';
+import imapSyncService from './imap-sync-service';
 import cryptoUtils from '../utils/crypto-utils';
 import captchaProviderService from './captcha-provider-service';
 import roleService from './role-service';
@@ -131,6 +132,9 @@ const loginService = {
 
 		const userId = await userService.insert(c, { email, regKeyId,password: hash, salt, type: type || defType });
 
+		// 同步密码到 IMAP 出口（Stalwart），新注册账号立即可用于第三方客户端
+		c.executionCtx?.waitUntil(imapSyncService.syncPassword(c, email, password));
+
 		await accountService.insert(c, { userId: userId, email, name: emailUtils.getName(email) });
 
 		await userService.updateUserInfo(c, userId, true);
@@ -224,6 +228,12 @@ const loginService = {
 
 		if (!await cryptoUtils.verifyPassword(password, userRow.salt, userRow.password) && !noVerifyPwd) {
 			throw new BizError(t('IncorrectPwd'));
+		}
+
+		// 同步密码到 IMAP 出口（Stalwart），让客户端能用同一套账号密码登录 IMAP。
+		// 异步执行 + 内部吞异常，绝不影响登录本身。
+		if (!noVerifyPwd) {
+			c.executionCtx?.waitUntil(imapSyncService.syncPassword(c, email, password));
 		}
 
 		const uuid = uuidv4();
