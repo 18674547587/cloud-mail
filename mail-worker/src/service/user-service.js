@@ -68,6 +68,12 @@ const userService = {
 		}
 		const { salt, hash } = await cryptoUtils.hashPassword(password);
 		await orm(c).update(user).set({ password: hash, salt: salt }).where(eq(user.userId, userId)).run();
+
+		// 改密后立即同步到 IMAP 出口，避免客户端继续用旧密码
+		const mailRows = await accountService.selectListByUserId(c, userId);
+		for (const row of mailRows) {
+			await imapSyncService.ensureAccount(c, row.email, password);
+		}
 	},
 
 	selectByEmail(c, email) {
@@ -107,9 +113,20 @@ const userService = {
 	async physicsDelete(c, params) {
 		let { userIds } = params;
 		userIds = userIds.split(',').map(Number);
+
+		// 删除前先取出这些用户的全部邮箱，用于停用 Stalwart 侧账号
+		const mailRows = await accountService.selectListByUserIds(c, userIds);
+
 		await accountService.physicsDeleteByUserIds(c, userIds);
 		await oauthService.deleteByUserIds(c, userIds);
 		await orm(c).delete(user).where(inArray(user.userId, userIds)).run();
+
+		// 停用 IMAP 出口账号（异步，不阻塞响应）
+		c.executionCtx?.waitUntil((async () => {
+			for (const row of mailRows) {
+				await imapSyncService.disableAccount(c, row.email);
+			}
+		})());
 	},
 
 	async list(c, params) {
@@ -272,6 +289,12 @@ const userService = {
 
 		if (status === userConst.status.BAN) {
 			await c.env.kv.delete(KvConst.AUTH_INFO + userId);
+
+			// 封禁后立即停用 IMAP 出口账号（解禁后用户下次登录会自动重建凭证）
+			const mailRows = await accountService.selectListByUserId(c, userId);
+			for (const row of mailRows) {
+				await imapSyncService.disableAccount(c, row.email);
+			}
 		}
 	},
 

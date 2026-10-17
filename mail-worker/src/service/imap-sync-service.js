@@ -175,6 +175,40 @@ const imapSyncService = {
 	},
 
 	/**
+	 * 停用 Stalwart 侧账号：清空 credentials（账号与邮件保留，可逆）。
+	 *
+	 * 用于「云邮删除用户 / 删除邮箱 / 封禁用户」后立即切断 IMAP/SMTP 登录。
+	 * 恢复路径：解禁或重新添加后，用户下次登录云邮时 ensureAccount 会自动重建凭证。
+	 */
+	async disableAccount(c, email) {
+
+		try {
+
+			if (!this.enabled(c) || !email) {
+				return false;
+			}
+
+			const id = await this.findAccountId(c, email);
+
+			if (!id) {
+				return false;
+			}
+
+			await this.call(c, [['x:Account/set', {
+				update: { [id]: { credentials: {} } }
+			}, 'd']]);
+
+			console.log('[IMAP] 已停用:', email);
+
+			return true;
+
+		} catch (e) {
+			console.error('[IMAP] disableAccount 失败:', email, e);
+			return false;
+		}
+	},
+
+	/**
 	 * 同步密码：让客户端能用云邮的邮箱 + 密码登录 IMAP
 	 *
 	 * 设计原则：绝不影响云邮自身的登录流程 —— 任何异常都吞掉并记日志。

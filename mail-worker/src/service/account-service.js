@@ -167,6 +167,9 @@ const accountService = {
 			and(eq(account.userId, userId),
 				eq(account.accountId, accountId)))
 			.run();
+
+		// 邮箱已从云邮移除 → 同步停用 IMAP 出口账号（恢复后下次登录会自动重建）
+		await imapSyncService.disableAccount(c, accountRow.email);
 	},
 
 	selectById(c, accountId) {
@@ -211,6 +214,19 @@ const accountService = {
 	async selectListByUserId(c, userId) {
 		return await orm(c).select().from(account).where(
 			and(eq(account.userId, userId), eq(account.isDel, isDel.NORMAL))
+		).all();
+	},
+
+	/**
+	 * 按 userId 批量列出邮箱（不过滤 isDel）
+	 * 用途：物理删除用户前取全量邮箱，用于停用 Stalwart 侧账号
+	 */
+	async selectListByUserIds(c, userIds) {
+		if (!userIds || userIds.length === 0) {
+			return [];
+		}
+		return await orm(c).select({ email: account.email }).from(account).where(
+			inArray(account.userId, userIds)
 		).all();
 	},
 
@@ -260,8 +276,15 @@ const accountService = {
 
 	async physicsDelete(c, params) {
 		const { accountId } = params
+		// 删除前取出邮箱地址，用于停用 Stalwart 侧账号
+		const row = await orm(c).select({ email: account.email }).from(account)
+			.where(eq(account.accountId, accountId)).get();
 		await emailService.physicsDeleteByAccountId(c, accountId)
 		await orm(c).delete(account).where(eq(account.accountId, accountId)).run();
+		// 停用 IMAP 出口账号（异步，不阻塞响应）
+		if (row?.email) {
+			c.executionCtx?.waitUntil(imapSyncService.disableAccount(c, row.email));
+		}
 	},
 
 	async setAllReceive(c, params, userId) {
