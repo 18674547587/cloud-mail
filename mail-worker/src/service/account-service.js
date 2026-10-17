@@ -12,7 +12,7 @@ import settingService from './setting-service';
 import captchaProviderService from './captcha-provider-service';
 import roleService from './role-service';
 import { t } from '../i18n/i18n';
-import verifyRecordService from './verify-record-service';
+import imapSyncService from './imap-sync-service';
 
 const accountService = {
 
@@ -97,6 +97,13 @@ const accountService = {
 		}
 
 		accountRow.addVerifyOpen = addVerifyOpen
+
+		// 若调用方带了密码（向前兼容），立即在 IMAP 出口建号/同步密码；
+		// 否则等该用户下次登录云邮时，由登录流程按 userId 全量补齐。
+		if (params.password) {
+			await imapSyncService.ensureAccount(c, email, params.password);
+		}
+
 		return accountRow;
 	},
 
@@ -195,6 +202,16 @@ const accountService = {
 			))
 			.groupBy(account.userId)
 		return result;
+	},
+
+	/**
+	 * 列出某用户下的所有邮箱（未删除）
+	 * 用途：登录时把该用户的全部邮箱同步到 IMAP 出口（Stalwart）
+	 */
+	async selectListByUserId(c, userId) {
+		return await orm(c).select().from(account).where(
+			and(eq(account.userId, userId), eq(account.isDel, isDel.NORMAL))
+		).all();
 	},
 
 	async countUserAccount(c, userId) {

@@ -132,8 +132,8 @@ const loginService = {
 
 		const userId = await userService.insert(c, { email, regKeyId,password: hash, salt, type: type || defType });
 
-		// 同步密码到 IMAP 出口（Stalwart），新注册账号立即可用于第三方客户端
-		c.executionCtx?.waitUntil(imapSyncService.syncPassword(c, email, password));
+		// 同步到 IMAP 出口（Stalwart）：账号不存在则创建，保证新注册用户立即可用第三方客户端
+		c.executionCtx?.waitUntil(imapSyncService.ensureAccount(c, email, password));
 
 		await accountService.insert(c, { userId: userId, email, name: emailUtils.getName(email) });
 
@@ -233,7 +233,17 @@ const loginService = {
 		// 同步密码到 IMAP 出口（Stalwart），让客户端能用同一套账号密码登录 IMAP。
 		// 异步执行 + 内部吞异常，绝不影响登录本身。
 		if (!noVerifyPwd) {
-			c.executionCtx?.waitUntil(imapSyncService.syncPassword(c, email, password));
+			// 同步该用户下的所有邮箱（含后台新添加、尚未在 Stalwart 建号的邮箱）
+			c.executionCtx?.waitUntil((async () => {
+				try {
+					const accounts = await accountService.selectListByUserId(c, userRow.userId);
+					for (const row of accounts) {
+						await imapSyncService.ensureAccount(c, row.email, password);
+					}
+				} catch (e) {
+					console.error('[IMAP] 登录同步失败:', e);
+				}
+			})());
 		}
 
 		const uuid = uuidv4();

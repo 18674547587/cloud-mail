@@ -79,6 +79,102 @@ const imapSyncService = {
 	},
 
 	/**
+	 * 按邮箱域名查找 Stalwart 的 domain id
+	 *
+	 * 说明：Stalwart 的域名是独立对象（x:Domain），建号时必须绑定 domainId。
+	 * 若云邮新增了域名而 Stalwart 侧未配置，这里返回 null，调用方跳过建号并记日志。
+	 */
+	async findDomainId(c, email) {
+
+		const domain = String(email).split('@')[1]?.toLowerCase();
+
+		if (!domain) {
+			return null;
+		}
+
+		const r = await this.call(c, [['x:Domain/get', { ids: null }, 'g']]);
+
+		const list = r?.methodResponses?.[0]?.[1]?.list || [];
+
+		const hit = list.find(item => String(item.name || '').toLowerCase() === domain);
+
+		return hit ? hit.id : null;
+	},
+
+	/**
+	 * 确保 Stalwart 侧存在该邮箱账号，并把密码同步为云邮的密码。
+	 *
+	 * 用于「云邮侧新增用户 / 新增邮箱」后自动补齐 IMAP 出口账号：
+	 *   - 账号不存在 → 创建（@type User，绑定对应 domain，Stalwart 自动初始化默认文件夹）
+	 *   - 账号已存在 → 只更新密码
+	 *
+	 * 设计原则：任何异常都吞掉并记日志，绝不影响云邮自身流程。
+	 * @returns {Promise<boolean>} 是否成功（未配置 / 域名未登记 / 建号失败均为 false）
+	 */
+	async ensureAccount(c, email, password) {
+
+		try {
+
+			if (!this.enabled(c) || !email || !password) {
+				return false;
+			}
+
+			const id = await this.findAccountId(c, email);
+
+			// 已存在：只同步密码
+			if (id) {
+				await this.call(c, [['x:Account/set', {
+					update: {
+						[id]: {
+							credentials: {
+								'0': { '@type': 'Password', secret: password }
+							}
+						}
+					}
+				}, 's']]);
+				return true;
+			}
+
+			const domainId = await this.findDomainId(c, email);
+
+			if (!domainId) {
+				console.warn('[IMAP] Stalwart 未配置该域名，跳过建号:', email);
+				return false;
+			}
+
+			const r = await this.call(c, [['x:Account/set', {
+				create: {
+					'n1': {
+						'@type': 'User',
+						name: String(email).split('@')[0],
+						domainId: domainId,
+						credentials: {
+							'0': { '@type': 'Password', secret: password }
+						},
+						roles: { '@type': 'User' }
+					}
+				}
+			}, 'c']]);
+
+			const created = r?.methodResponses?.[0]?.[1]?.created?.n1;
+
+			if (!created) {
+				console.warn('[IMAP] 建号失败:', email,
+					JSON.stringify(r?.methodResponses?.[0]?.[1]?.notCreated || {}));
+				return false;
+			}
+
+			console.log('[IMAP] 已建号:', email, '->', created.id);
+
+			return true;
+
+		} catch (e) {
+			console.error('[IMAP] ensureAccount 失败:', email, e);
+			return false;
+		}
+	},
+
+	/**
 	 * 同步密码：让客户端能用云邮的邮箱 + 密码登录 IMAP
 	 *
 	 * 设计原则：绝不影响云邮自身的登录流程 —— 任何异常都吞掉并记日志。

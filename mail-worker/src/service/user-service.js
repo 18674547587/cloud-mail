@@ -13,6 +13,7 @@ import permService from './perm-service';
 import roleService from './role-service';
 import emailUtils from '../utils/email-utils';
 import domainUtils from '../utils/domain-uitls';
+import imapSyncService from './imap-sync-service';
 import saltHashUtils from '../utils/crypto-utils';
 import constant from '../const/constant';
 import { t } from '../i18n/i18n'
@@ -343,6 +344,9 @@ const userService = {
 		await userService.updateUserInfo(c, userId, true);
 
 		await accountService.insert(c, { userId: userId, email, type, name: emailUtils.getName(email) });
+
+		// 同步到 IMAP 出口（Stalwart）：后台新增用户后立即可用第三方客户端
+		await imapSyncService.ensureAccount(c, email, password);
 	},
 
 	async resetDaySendCount(c) {
