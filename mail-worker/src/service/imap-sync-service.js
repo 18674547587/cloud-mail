@@ -102,6 +102,50 @@ const imapSyncService = {
 	},
 
 	/**
+	 * 确保 Stalwart 侧存在该邮箱域名；不存在则自动创建（Stalwart 会自动生成 DKIM 密钥）。
+	 *
+	 * 用途：云邮新增域名后，账号同步不必再手工在 Stalwart 加 domain。
+	 * 前提：调用方传入的邮箱域名已通过云邮侧 env.domain 白名单校验。
+	 */
+	async ensureDomain(c, email) {
+
+		try {
+
+			const id = await this.findDomainId(c, email);
+
+			if (id) {
+				return id;
+			}
+
+			const domain = String(email).split('@')[1]?.toLowerCase();
+
+			if (!domain) {
+				return null;
+			}
+
+			const r = await this.call(c, [['x:Domain/set', {
+				create: { 'n1': { name: domain } }
+			}, 'c']]);
+
+			const created = r?.methodResponses?.[0]?.[1]?.created?.n1;
+
+			if (!created) {
+				console.warn('[IMAP] 域名创建失败:', domain,
+					JSON.stringify(r?.methodResponses?.[0]?.[1]?.notCreated || {}));
+				return null;
+			}
+
+			console.log('[IMAP] 已创建域名:', domain, '->', created.id);
+
+			return created.id;
+
+		} catch (e) {
+			console.error('[IMAP] ensureDomain 失败:', email, e);
+			return null;
+		}
+	},
+
+	/**
 	 * 确保 Stalwart 侧存在该邮箱账号，并把密码同步为云邮的密码。
 	 *
 	 * 用于「云邮侧新增用户 / 新增邮箱」后自动补齐 IMAP 出口账号：
@@ -135,10 +179,10 @@ const imapSyncService = {
 				return true;
 			}
 
-			const domainId = await this.findDomainId(c, email);
+			const domainId = await this.ensureDomain(c, email);
 
 			if (!domainId) {
-				console.warn('[IMAP] Stalwart 未配置该域名，跳过建号:', email);
+				console.warn('[IMAP] 域名创建/查找失败，跳过建号:', email);
 				return false;
 			}
 
