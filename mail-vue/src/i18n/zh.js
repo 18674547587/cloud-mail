@@ -66,6 +66,7 @@ const zh = {
     noMoreData: '没有更多数据了',
     noMessagesFound: '没有任何邮件',
     addAccount: '添加邮箱',
+  imapPasswordOptional: "IMAP 密码（可选，留空则下次登录自动同步）",
     emailAccount: '邮箱',
     account: '邮箱',
     userAccount: '用户邮箱',

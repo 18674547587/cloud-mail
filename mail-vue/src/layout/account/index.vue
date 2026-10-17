@@ -100,6 +100,14 @@
             </div>
           </template>
         </el-input>
+        <el-input
+            v-model="addForm.password"
+            type="password"
+            show-password
+            :placeholder="$t('imapPasswordOptional')"
+            autocomplete="new-password"
+            style="margin-top: 10px"
+        />
         <el-button class="btn" type="primary" @click="submit" :loading="addLoading"
         >{{ $t('add') }}
         </el-button>
@@ -173,6 +181,7 @@ let verifyErrorCount = 0
 let first = true
 const addForm = reactive({
   email: '',
+  password: '',
   suffix: settingStore.domainList[0]
 })
 let skeletonRows = 10
@@ -536,10 +545,11 @@ function submit() {
 
 function doAdd() {
   addLoading.value = true
-  accountAdd(addForm.email + addForm.suffix, verifyToken).then(account => {
+  accountAdd(addForm.email + addForm.suffix, verifyToken, addForm.password).then(account => {
     addLoading.value = false
     showAdd.value = false
     addForm.email = ''
+    addForm.password = ''
     accounts.push(account)
     verifyToken = ''
     settingStore.settings.addVerifyOpen = account.addVerifyOpen

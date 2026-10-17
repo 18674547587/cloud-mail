@@ -16,7 +16,7 @@ export default defineConfig(({mode}) => {
         },
         base: env.VITE_STATIC_URL || '/',
         plugins: [vue(),
-            VitePWA({
+            ...(process.env.DISABLE_PWA ? [] : [VitePWA({
                 injectRegister: 'script-defer',
                 manifest: {
                     name: env.VITE_PWA_NAME,
@@ -38,7 +38,7 @@ export default defineConfig(({mode}) => {
                     navigateFallback: null,
                     cleanupOutdatedCaches: true,
                 }
-            }),
+            })]),
             AutoImport({
                 resolvers: [ElementPlusResolver()],
             }),

@@ -66,6 +66,7 @@ const en = {
     noMoreData: 'No more data',
     noMessagesFound: 'No messages found',
     addAccount: 'Add Email Address',
+  imapPasswordOptional: "IMAP password (optional; synced on next login if empty)",
     emailAccount: 'Email',
     account: 'Address',
     userAccount: 'User Email Address',
