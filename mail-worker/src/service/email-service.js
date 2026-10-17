@@ -169,6 +169,7 @@ const emailService = {
 				eq(email.userId, userId),
 				inArray(email.emailId, emailIdList)))
 			.run();
+		c.executionCtx?.waitUntil(this.syncToImap(c, userId, emailIdList, { deleted: true }));
 	},
 
 	receive(c, params, cidAttList, r2domain) {
@@ -1085,9 +1086,114 @@ const emailService = {
 		await orm(c).delete(email).where(eq(email.accountId, accountId)).run();
 	},
 
+	/**
+	 * 把云邮侧的邮件状态同步到 IMAP 出口（Stalwart）
+	 */
+	async syncToImap(c, userId, emailIds, flags) {
+
+		try {
+
+			const ids = Array.isArray(emailIds) ? emailIds.map(Number) : String(emailIds).split(',').map(Number);
+
+			if (ids.length === 0) {
+				return;
+			}
+
+			const rows = await orm(c).select({
+				messageId: email.messageId,
+				accountId: email.accountId
+			}).from(email).where(and(eq(email.userId, userId), inArray(email.emailId, ids))).all();
+
+			if (rows.length === 0) {
+				return;
+			}
+
+			const accountIds = [...new Set(rows.map(r => r.accountId))];
+
+			const accs = await orm(c).select({
+				accountId: account.accountId,
+				email: account.email
+			}).from(account).where(inArray(account.accountId, accountIds)).all();
+
+			const map = new Map(accs.map(a => [a.accountId, a.email]));
+
+			for (const r of rows) {
+				const to = map.get(r.accountId);
+				if (to && r.messageId) {
+					await imapSyncService.syncMailFlags(c, to, r.messageId, flags);
+				}
+			}
+
+		} catch (e) {
+			console.error('[IMAP] 同步状态失败:', e);
+		}
+	},
+
+	/**
+	 * 接收 Stalwart 侧的状态回写（由 VPS 轮询脚本调用，X-Api-Secret 鉴权）
+	 */
+	async applyImapState(c, params) {
+
+		const { email: toEmail, messageId, unread, deleted, starred } = params;
+
+		if (!toEmail || !messageId) {
+			return false;
+		}
+
+		const acc = await orm(c).select().from(account).where(eq(account.email, toEmail)).get();
+
+		if (!acc) {
+			return false;
+		}
+
+		// Stalwart 的 messageId 不带尖括号，云邮 D1 存的是带尖括号的格式，两种都要匹配
+		const midRaw = String(messageId).trim();
+		const midBracket = midRaw.startsWith('<') ? midRaw : '<' + midRaw + '>';
+
+		const row = await orm(c).select().from(email).where(
+			and(
+				eq(email.accountId, acc.accountId),
+				or(eq(email.messageId, midRaw), eq(email.messageId, midBracket))
+			)).get();
+
+		if (!row) {
+			return false;
+		}
+
+		const patch = {};
+
+		if (typeof unread === 'boolean') {
+			patch.unread = unread ? emailConst.unread.UNREAD : emailConst.unread.READ;
+		}
+
+		if (deleted) {
+			patch.isDel = isDel.DELETE;
+		}
+
+		if (Object.keys(patch).length > 0) {
+			await orm(c).update(email).set(patch).where(eq(email.emailId, row.emailId)).run();
+		}
+
+		if (typeof starred === 'boolean') {
+			if (starred) {
+				const exist = await orm(c).select().from(star).where(
+					and(eq(star.userId, row.userId), eq(star.emailId, row.emailId))).get();
+				if (!exist) {
+					await orm(c).insert(star).values({ userId: row.userId, emailId: row.emailId }).run();
+				}
+			} else {
+				await orm(c).delete(star).where(
+					and(eq(star.userId, row.userId), eq(star.emailId, row.emailId))).run();
+			}
+		}
+
+		return true;
+	},
+
 	async read(c, params, userId) {
 		const { emailIds } = params;
 		await orm(c).update(email).set({ unread: emailConst.unread.READ }).where(and(eq(email.userId, userId), inArray(email.emailId, emailIds)));
+		c.executionCtx?.waitUntil(this.syncToImap(c, userId, emailIds, { seen: true }));
 	}
 };
 

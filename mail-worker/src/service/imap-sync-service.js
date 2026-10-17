@@ -370,6 +370,111 @@ const imapSyncService = {
 	},
 
 	/**
+	 * 按 Message-ID 在指定 Stalwart 账号里定位邮件（取最近 300 封后本地比对）
+	 */
+	async findEmailByMessageId(c, accountId, messageId) {
+
+		const target = String(messageId || '').replace(/[<>]/g, '').toLowerCase();
+
+		if (!target) {
+			return null;
+		}
+
+		const q = await this.call(c, [['Email/query', {
+			accountId: accountId,
+			sort: [{ property: 'receivedAt', isAscending: false }],
+			limit: 300
+		}, 'q']], JMAP_MAIL);
+
+		const ids = q?.methodResponses?.[0]?.[1]?.ids || [];
+
+		if (ids.length === 0) {
+			return null;
+		}
+
+		const g = await this.call(c, [['Email/get', {
+			accountId: accountId,
+			ids: ids,
+			properties: ['id', 'messageId', 'keywords', 'mailboxIds']
+		}, 'g']], JMAP_MAIL);
+
+		const list = g?.methodResponses?.[0]?.[1]?.list || [];
+
+		return list.find(e => (e.messageId || []).some(m =>
+			String(m).replace(/[<>]/g, '').toLowerCase() === target)) || null;
+	},
+
+	/**
+	 * 把云邮侧的已读 / 星标 / 删除同步到 Stalwart
+	 * flags: { seen?: boolean, flagged?: boolean, deleted?: boolean }
+	 */
+	async syncMailFlags(c, toEmail, messageId, flags) {
+
+		try {
+
+			if (!this.enabled(c) || !toEmail || !messageId) {
+				return false;
+			}
+
+			const accountId = await this.findAccountId(c, toEmail);
+
+			if (!accountId) {
+				return false;
+			}
+
+			const emailObj = await this.findEmailByMessageId(c, accountId, messageId);
+
+			if (!emailObj) {
+				return false;
+			}
+
+			const patch = {};
+
+			if (typeof flags.seen === 'boolean' || typeof flags.flagged === 'boolean') {
+				const kw = { ...(emailObj.keywords || {}) };
+				if (typeof flags.seen === 'boolean') {
+					if (flags.seen) {
+						kw['$seen'] = true;
+					} else {
+						delete kw['$seen'];
+					}
+				}
+				if (typeof flags.flagged === 'boolean') {
+					if (flags.flagged) {
+						kw['$flagged'] = true;
+					} else {
+						delete kw['$flagged'];
+					}
+				}
+				patch.keywords = kw;
+			}
+
+			if (flags.deleted) {
+				const mb = await this.call(c, [['Mailbox/get', { accountId: accountId }, 'm']], JMAP_MAIL);
+				const trash = (mb?.methodResponses?.[0]?.[1]?.list || []).find(m => m.role === 'trash');
+				if (trash) {
+					patch.mailboxIds = { [trash.id]: true };
+				}
+			}
+
+			if (Object.keys(patch).length === 0) {
+				return false;
+			}
+
+			await this.call(c, [['Email/set', {
+				accountId: accountId,
+				update: { [emailObj.id]: patch }
+			}, 's']], JMAP_MAIL);
+
+			return true;
+
+		} catch (e) {
+			console.error('[IMAP] syncMailFlags 失败:', toEmail, messageId, e);
+			return false;
+		}
+	},
+
+	/**
 	 * 读取附件内容并转 base64，供 buildRawMessage 内联。
 	 * 总大小超过 maxTotal 时停止追加，避免 Worker 内存/CPU 超限（只投已读部分）。
 	 */

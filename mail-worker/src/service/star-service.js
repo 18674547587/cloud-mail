@@ -29,6 +29,7 @@ const starService = {
 		}
 
 		await orm(c).insert(star).values({ userId, emailId }).run();
+		c.executionCtx?.waitUntil(emailService.syncToImap(c, userId, [emailId], { flagged: true }));
 	},
 
 	async cancel(c, params, userId) {
@@ -38,6 +39,7 @@ const starService = {
 				eq(star.userId, userId),
 				eq(star.emailId, emailId)))
 			.run();
+		c.executionCtx?.waitUntil(emailService.syncToImap(c, userId, [emailId], { flagged: false }));
 	},
 
 	async list(c, params, userId) {
