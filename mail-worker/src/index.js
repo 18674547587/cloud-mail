@@ -18,6 +18,11 @@ export default {
 
 		const url = new URL(req.url)
 
+		// 客户端自动配置（Thunderbird autoconfig / Outlook autodiscover）
+		if (url.pathname === '/mail/config-v1.1.xml' || url.pathname === '/autodiscover/autodiscover.xml') {
+			return handleAutoConfig(url);
+		}
+
 		// 邮件实时推送的 WebSocket 入口
 		// 必须在 hono 之前拦截：WebSocket 无法携带自定义请求头，token 只能走 URL 参数
 		if (url.pathname === '/api/push/ws') {
@@ -56,6 +61,79 @@ export default {
 		await logService.dailyJob(env, c)
 	},
 };
+
+/**
+ * 客户端自动配置
+ * - Thunderbird: https://autoconfig.<domain>/mail/config-v1.1.xml
+ * - Outlook:     https://autodiscover.<domain>/autodiscover/autodiscover.xml
+ * 所有域名共用同一组服务器地址（imap/smtp.1206201.xyz）。
+ */
+function handleAutoConfig(url) {
+
+	const domain = (url.hostname || '').replace(/^autoconfig\./i, '').replace(/^autodiscover\./i, '');
+	const IMAP = 'imap.1206201.xyz';
+	const SMTP = 'smtp.1206201.xyz';
+
+	if (url.pathname === '/mail/config-v1.1.xml') {
+		const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<clientConfig version="1.1">
+  <emailProvider id="${domain}">
+    <domain>${domain}</domain>
+    <displayName>${domain} Mail</displayName>
+    <displayShortName>${domain}</displayShortName>
+    <incomingServer type="imap">
+      <hostname>${IMAP}</hostname>
+      <port>993</port>
+      <socketType>SSL</socketType>
+      <authentication>password-cleartext</authentication>
+      <username>%EMAILADDRESS%</username>
+    </incomingServer>
+    <outgoingServer type="smtp">
+      <hostname>${SMTP}</hostname>
+      <port>465</port>
+      <socketType>SSL</socketType>
+      <authentication>password-cleartext</authentication>
+      <username>%EMAILADDRESS%</username>
+    </outgoingServer>
+  </emailProvider>
+</clientConfig>`;
+		return new Response(xml, {
+			headers: { 'Content-Type': 'application/xml; charset=UTF-8', 'Cache-Control': 'public, max-age=3600' }
+		});
+	}
+
+	const xml = `<?xml version="1.0" encoding="utf-8"?>
+<Autodiscover xmlns="http://schemas.microsoft.com/exchange/autodiscover/responseschema/2006">
+  <Response xmlns="http://schemas.microsoft.com/exchange/autodiscover/outlook/responseschema/2006a">
+    <Account>
+      <AccountType>email</AccountType>
+      <Action>settings</Action>
+      <Protocol>
+        <Type>IMAP</Type>
+        <Server>${IMAP}</Server>
+        <Port>993</Port>
+        <DomainRequired>off</DomainRequired>
+        <SPA>off</SPA>
+        <SSL>on</SSL>
+        <AuthRequired>on</AuthRequired>
+      </Protocol>
+      <Protocol>
+        <Type>SMTP</Type>
+        <Server>${SMTP}</Server>
+        <Port>465</Port>
+        <DomainRequired>off</DomainRequired>
+        <SPA>off</SPA>
+        <SSL>on</SSL>
+        <AuthRequired>on</AuthRequired>
+      </Protocol>
+    </Account>
+  </Response>
+</Autodiscover>`;
+
+	return new Response(xml, {
+		headers: { 'Content-Type': 'text/xml; charset=utf-8', 'Cache-Control': 'public, max-age=3600' }
+	});
+}
 
 /**
  * 处理邮件实时推送的 WebSocket 连接
