@@ -649,18 +649,25 @@ const emailService = {
 		// 这里补投一次，否则 IMAP 客户端看不到站内邮件。
 		for (const row of savedRows) {
 			try {
-				c.executionCtx?.waitUntil(
-					imapSyncService.deliverEmail(c, row.toEmail, imapSyncService.buildRawMessage({
-						fromEmail: row.sendEmail,
-						fromName: row.name,
-						toEmail: row.toEmail,
-						toName: row.toName,
-						subject: row.subject,
-						html: row.content,
-						text: row.text,
-						messageId: row.messageId,
-					}))
-				);
+				c.executionCtx?.waitUntil((async () => {
+					try {
+						// 读取附件并内联进 MIME；总量超限时只投正文（见 loadAttachments）
+						const rawAtts = await imapSyncService.loadAttachments(c, attList);
+						await imapSyncService.deliverEmail(c, row.toEmail, imapSyncService.buildRawMessage({
+							fromEmail: row.sendEmail,
+							fromName: row.name,
+							toEmail: row.toEmail,
+							toName: row.toName,
+							subject: row.subject,
+							html: row.content,
+							text: row.text,
+							messageId: row.messageId,
+							attachments: rawAtts,
+						}));
+					} catch (e) {
+						console.error('[IMAP] 站内邮件投递失败:', e);
+					}
+				})());
 			} catch (e) {
 				console.error('[IMAP] 站内邮件投递失败:', e);
 			}

@@ -20,6 +20,8 @@
  * 未配置时全部方法静默跳过，不影响云邮自身功能。
  */
 
+import r2Service from './r2-service';
+
 const JMAP_ADMIN = ['urn:ietf:params:jmap:core', 'urn:stalwart:jmap'];
 const JMAP_MAIL = ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'];
 
@@ -368,13 +370,68 @@ const imapSyncService = {
 	},
 
 	/**
+	 * 读取附件内容并转 base64，供 buildRawMessage 内联。
+	 * 总大小超过 maxTotal 时停止追加，避免 Worker 内存/CPU 超限（只投已读部分）。
+	 */
+	async loadAttachments(c, attList, maxTotal = 3 * 1024 * 1024) {
+
+		const out = [];
+		let total = 0;
+
+		for (const a of attList || []) {
+
+			if (!a || !a.key) {
+				continue;
+			}
+
+			const size = Number(a.size) || 0;
+
+			if (total + size > maxTotal) {
+				console.warn('[IMAP] 附件总量超限，跳过:', a.filename, '已累计', total);
+				break;
+			}
+
+			try {
+
+				const resp = await r2Service.toObjResp(c, a.key);
+
+				if (!resp || !resp.ok) {
+					console.warn('[IMAP] 附件读取失败:', a.filename, resp?.status);
+					continue;
+				}
+
+				const bytes = new Uint8Array(await resp.arrayBuffer());
+				let bin = '';
+
+				for (let i = 0; i < bytes.length; i += 0x8000) {
+					bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+				}
+
+				out.push({
+					filename: a.filename || 'attachment',
+					mimeType: a.mimeType || 'application/octet-stream',
+					disposition: a.disposition || 'attachment',
+					contentId: a.contentId || null,
+					base64: btoa(bin)
+				});
+
+				total += size || bytes.length;
+
+			} catch (e) {
+				console.error('[IMAP] 附件读取异常:', a.filename, e);
+			}
+		}
+
+		return out;
+	},
+
+	/**
 	 * 把结构化邮件数据构造成 RFC822 报文（Uint8Array）。
 	 *
-	 * 用途：站内邮件（收件人同属云邮域名）走的是 HandleOnSiteEmail，不经过
-	 * Cloudflare Email Routing，因此收信流程里的投递钩子不会触发。这里手工构造
-	 * 一份最简 MIME 报文补投，否则 IMAP 客户端看不到站内邮件。
+	 * 无附件时输出单 part text/html；有附件时输出 multipart/mixed。
+	 * attachments 每项：{ filename, mimeType, disposition, contentId, base64 }
 	 */
-	buildRawMessage({ fromEmail, fromName, toEmail, toName, subject, html, text, messageId }) {
+	buildRawMessage({ fromEmail, fromName, toEmail, toName, subject, html, text, messageId, attachments }) {
 
 		const CRLF = '\r\n';
 
@@ -387,7 +444,14 @@ const imapSyncService = {
 			return btoa(bin);
 		};
 
-		const wrap = (s) => (s.match(/.{1,76}/g) || []).join(CRLF);
+		// 76 字符折行：用循环而不是正则，避免大附件时生成海量匹配对象
+		const wrap = (s) => {
+			const out = [];
+			for (let i = 0; i < s.length; i += 76) {
+				out.push(s.slice(i, i + 76));
+			}
+			return out.join(CRLF);
+		};
 
 		// 非 ASCII 头字段用 RFC 2047 B 编码
 		const hdr = (v) => (/^[\x20-\x7E]*$/.test(v || '') ? (v || '') : '=?UTF-8?B?' + b64(v) + '?=');
@@ -404,12 +468,43 @@ const imapSyncService = {
 		}
 
 		lines.push('MIME-Version: 1.0');
-		lines.push('Content-Type: text/html; charset=UTF-8');
-		lines.push('Content-Transfer-Encoding: base64');
 
 		const body = html || `<pre>${(text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;')}</pre>`;
+		const atts = Array.isArray(attachments) ? attachments.filter(a => a && a.base64) : [];
 
-		return new TextEncoder().encode(lines.join(CRLF) + CRLF + CRLF + wrap(b64(body)) + CRLF);
+		if (atts.length === 0) {
+			lines.push('Content-Type: text/html; charset=UTF-8');
+			lines.push('Content-Transfer-Encoding: base64');
+			return new TextEncoder().encode(lines.join(CRLF) + CRLF + CRLF + wrap(b64(body)) + CRLF);
+		}
+
+		const boundary = '----=_CM_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2);
+		lines.push(`Content-Type: multipart/mixed; boundary="${boundary}"`);
+		lines.push('');
+		lines.push('--' + boundary);
+		lines.push('Content-Type: text/html; charset=UTF-8');
+		lines.push('Content-Transfer-Encoding: base64');
+		lines.push('');
+		lines.push(wrap(b64(body)));
+
+		for (const a of atts) {
+			const fn = hdr(a.filename || 'attachment');
+			lines.push('');
+			lines.push('--' + boundary);
+			lines.push(`Content-Type: ${a.mimeType || 'application/octet-stream'}; name="${fn}"`);
+			lines.push('Content-Transfer-Encoding: base64');
+			lines.push(`Content-Disposition: ${a.disposition || 'attachment'}; filename="${fn}"`);
+			if (a.contentId) {
+				lines.push(`Content-ID: <${a.contentId}>`);
+			}
+			lines.push('');
+			lines.push(wrap(a.base64));
+		}
+
+		lines.push('');
+		lines.push('--' + boundary + '--');
+
+		return new TextEncoder().encode(lines.join(CRLF) + CRLF);
 	}
 };
 
